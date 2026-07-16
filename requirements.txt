@@ -1,0 +1,25 @@
+# Pinned dependencies for the Feishu/Lark <-> Claude Code bridge.
+# Install into the project venv with:
+#   python -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# Direct dependencies the code imports:
+#   lark-oapi      — Feishu/Lark official SDK (REST client + WebSocket long-connection)
+#   requests       — HTTP transport used by the SDK / helpers
+#   websockets     — WebSocket client used by lark-oapi's long-connection mode
+# Everything else below is a transitive dependency, pinned for reproducibility.
+lark-oapi==1.7.1
+requests==2.34.2
+websockets==15.0.1
+
+# --- transitive (pinned; re-resolve with `pip install <direct> && pip freeze` if you bump versions) ---
+anyio==4.14.1
+certifi==2026.6.17
+charset-normalizer==3.4.9
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+numpy==2.5.1
+pycryptodome==3.23.0
+requests-toolbelt==1.0.0
+urllib3==2.7.0

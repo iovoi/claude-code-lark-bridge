@@ -1,0 +1,6 @@
+{
+  "name": "feishu",
+  "description": "Feishu/Lark channel for Claude Code — pushes inbound Feishu messages into a running Claude session and exposes reply/react tools. Configure allowlist via FEISHU_ALLOWED_OPEN_IDS / FEISHU_ALLOWED_CHAT_IDS in .env.",
+  "version": "0.1.0",
+  "keywords": ["feishu", "lark", "messaging", "channel", "mcp"]
+}

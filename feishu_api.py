@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """
-Shared helpers for the Feishu/Lark bridge scripts.
+Shared helpers for the Feishu/Lark MCP channel (mcp_channel/).
+
+Provides the Feishu REST client + the send/react actions the channel's `reply` /
+`react` tools call, plus .env loading. The inbound websocket ingest lives in
+mcp_channel/feishu_ingest.py (it uses lark.ws.Client directly).
 
 NOTE on clients:
-  - client() here returns the REST `lark.Client` used for sending messages and reactions.
-  - bot.py separately builds a `lark.ws.Client` for the WebSocket long-connection ingest. Do NOT route
-    the websocket client through this module.
+  - client() here returns the REST `lark.Client` used for sending messages and
+    reactions.
+  - mcp_channel/feishu_ingest.py separately builds a `lark.ws.Client` for the
+    WebSocket long-connection ingest. Do NOT route the websocket client through
+    this module.
 """
 
 import json
 import os
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -57,28 +62,6 @@ APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
 CONVERSATION_DIR = Path(
     os.environ.get("FEISHU_CONVERSATION_DIR", str(PROJECT_DIR / "conversation"))
 )
-CLAUDE_PANE = os.environ.get("FEISHU_CLAUDE_PANE", "%0")
-EMOJI_WORKING = os.environ.get("FEISHU_EMOJI_WORKING", "OnIt")
-EMOJI_DONE = os.environ.get("FEISHU_EMOJI_DONE", "Done")
-STALE_SEC = int(os.environ.get("FEISHU_STALE_SEC", "300"))
-
-VENV_PYTHON = str(PROJECT_DIR / ".venv" / "bin" / "python")
-
-# --- ledger paths ---
-BUSY_PATH = CONVERSATION_DIR / ".claude_busy.json"
-DELIVERED_PATH = CONVERSATION_DIR / ".delivered.json"
-REACTIONS_PATH = CONVERSATION_DIR / ".reactions.json"
-
-# --- internal command help (single source of truth) ---
-HELP_TEXT = (
-    "Supported commands:\n"
-    "- command help — show this help\n"
-    "- command kill — interrupt Claude's current task and return to ready\n"
-    "- command mode plan|auto|manual — switch Claude Code permission mode"
-)
-
-# Box-drawing / TUI border characters to trim from scraped reply lines.
-_BORDER_CHARS = "│║┃╮╭╯╰├┤┬┴┼─━┄┅┆┇┈┉┊┋╗╝╚╔║═•·●○◆◇■□▶►◀▼"
 
 _client = None
 
@@ -91,7 +74,7 @@ def client() -> lark.Client:
     return _client
 
 
-# --- JSON ledger helpers (atomic) ---
+# --- JSON helpers (atomic) ---
 def read_json(path: Path, default=None):
     if default is None:
         default = {}
@@ -175,31 +158,3 @@ def delete_reaction(message_id: str, reaction_id: str) -> bool:
         return client().im.v1.message_reaction.delete(req).success()
     except Exception:
         return False
-
-
-# --- TUI scraping helpers ---
-def clean_line(s: str) -> str:
-    """Strip leading/trailing whitespace and box-drawing border characters."""
-    return s.strip().strip(_BORDER_CHARS).strip()
-
-
-def claude_is_busy() -> bool:
-    """Is Claude Code mid-turn (NOT idle at the input prompt)?
-
-    Only the live bottom chrome is inspected (status line + input box + separator), so stale
-    spinner lines from a finished turn can't false-positive. Claude Code shows 'esc to interrupt'
-    on the status line during any active turn (including recaps), and the input box reads
-    'queued messages' / 'press up to edit' when input has been queued on a busy Claude."""
-    try:
-        r = subprocess.run(
-            ["tmux", "capture-pane", "-p", "-t", CLAUDE_PANE, "-S", "-3"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except Exception:
-        return False  # fail open on capture error; the deliver child re-checks anyway
-    tail = " ".join((r.stdout or "").lower().splitlines()[-3:])
-    return (
-        "esc to interrupt" in tail
-        or "queued messages" in tail
-        or "press up to edit" in tail
-    )

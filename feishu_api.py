@@ -12,6 +12,11 @@ NOTE on clients:
   - mcp_channel/feishu_ingest.py separately builds a `lark.ws.Client` for the
     WebSocket long-connection ingest. Do NOT route the websocket client through
     this module.
+
+NOTE on imports: `lark_oapi` is imported LAZILY (inside the functions that use
+it), not at module top. Importing lark_oapi is slow (~100s on a WSL /mnt/c drvfs),
+and deferring it lets the MCP server answer `initialize` immediately and import
+lark in the background. The first send/react call pays the import cost once.
 """
 
 import json
@@ -19,16 +24,6 @@ import os
 import re
 import tempfile
 from pathlib import Path
-
-import lark_oapi as lark
-from lark_oapi.api.im.v1 import (
-    CreateMessageRequest,
-    CreateMessageRequestBody,
-    CreateMessageReactionRequest,
-    CreateMessageReactionRequestBody,
-    DeleteMessageReactionRequest,
-    Emoji,
-)
 
 PROJECT_DIR = Path(__file__).resolve().parent
 
@@ -46,7 +41,6 @@ def load_env(path: Path = None) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip()
-        # strip inline comment only if unquoted and whitespace-preceded
         if value and not (value[0] in "\"'"):
             m = re.search(r"\s+#", value)
             if m:
@@ -66,10 +60,12 @@ CONVERSATION_DIR = Path(
 _client = None
 
 
-def client() -> lark.Client:
-    """REST client (cached singleton; the SDK refreshes the tenant token as needed)."""
+def client():
+    """REST client (cached singleton; the SDK refreshes the tenant token as needed).
+    Imports lark_oapi lazily on first use."""
     global _client
     if _client is None:
+        import lark_oapi as lark
         _client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
     return _client
 
@@ -105,9 +101,10 @@ def atomic_write_json(path: Path, obj) -> None:
         raise
 
 
-# --- Feishu REST actions ---
+# --- Feishu REST actions (lark_oapi imported lazily inside each) ---
 def send_text(chat_id: str, text: str):
     """Send a text message to chat_id. Returns message_id or None."""
+    from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
     req = (
         CreateMessageRequest.builder()
         .receive_id_type("chat_id")
@@ -128,6 +125,11 @@ def send_text(chat_id: str, text: str):
 
 def add_reaction(message_id: str, code: str):
     """Add an emoji reaction. Returns reaction_id or None (fail-soft)."""
+    from lark_oapi.api.im.v1 import (
+        CreateMessageReactionRequest,
+        CreateMessageReactionRequestBody,
+        Emoji,
+    )
     req = (
         CreateMessageReactionRequest.builder()
         .message_id(message_id)
@@ -148,6 +150,7 @@ def add_reaction(message_id: str, code: str):
 
 
 def delete_reaction(message_id: str, reaction_id: str) -> bool:
+    from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
     req = (
         DeleteMessageReactionRequest.builder()
         .message_id(message_id)

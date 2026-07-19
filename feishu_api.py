@@ -60,12 +60,33 @@ CONVERSATION_DIR = Path(
 _client = None
 
 
+
+def route_lark_logs_to_stderr() -> None:
+    """lark_oapi/core/log.py attaches a StreamHandler(sys.stdout) to the 'Lark'
+    logger. Under the MCP stdio protocol stdout MUST be pure JSON-RPC, so any
+    lark log line there (e.g. '[Lark] [INFO] connected to wss://...') corrupts
+    the stream ('Ignoring non-JSON line on stdout'). Move lark's logs to stderr.
+
+    Idempotent: call after importing lark_oapi (it installs the stdout handler
+    at import time)."""
+    import logging
+    import sys
+    lk = logging.getLogger("Lark")
+    for h in list(lk.handlers):
+        if getattr(h, "stream", None) is sys.stdout:
+            lk.removeHandler(h)
+    if not any(getattr(h, "stream", None) is sys.stderr for h in lk.handlers):
+        lk.addHandler(logging.StreamHandler(sys.stderr))
+    lk.propagate = False
+
+
 def client():
     """REST client (cached singleton; the SDK refreshes the tenant token as needed).
     Imports lark_oapi lazily on first use."""
     global _client
     if _client is None:
         import lark_oapi as lark
+        route_lark_logs_to_stderr()
         _client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
     return _client
 

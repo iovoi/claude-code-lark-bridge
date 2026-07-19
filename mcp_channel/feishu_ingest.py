@@ -46,8 +46,9 @@ def start_ws(on_message) -> threading.Thread:
     the thread, so the caller (the MCP event loop) is never blocked by them."""
     def run() -> None:
         # Import lark INSIDE the thread so it doesn't block the MCP server startup.
-        import lark_oapi as lark
+        import lark_oapi as lark  # noqa: F401
         from lark_oapi.api.im.v1 import P2ImMessageReceiveV1  # noqa: F401 (type hint for handler)
+        api.route_lark_logs_to_stderr()  # noqa: F401 (type hint for handler)
 
         def on_receive(data) -> None:
             try:

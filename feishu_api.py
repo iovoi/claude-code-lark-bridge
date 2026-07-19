@@ -56,6 +56,9 @@ APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
 CONVERSATION_DIR = Path(
     os.environ.get("FEISHU_CONVERSATION_DIR", str(PROJECT_DIR / "conversation"))
 )
+# Emoji reaction codes (Feishu UPPER_SNAKE). Used by the channel's working->done cycle.
+EMOJI_WORKING = os.environ.get("FEISHU_EMOJI_WORKING", "OnIt")
+EMOJI_DONE = os.environ.get("FEISHU_EMOJI_DONE", "Done")
 
 _client = None
 
@@ -78,6 +81,9 @@ def route_lark_logs_to_stderr() -> None:
     if not any(getattr(h, "stream", None) is sys.stderr for h in lk.handlers):
         lk.addHandler(logging.StreamHandler(sys.stderr))
     lk.propagate = False
+    lk.setLevel(logging.DEBUG)
+    for h in lk.handlers:
+        h.setLevel(logging.DEBUG)
 
 
 def client():

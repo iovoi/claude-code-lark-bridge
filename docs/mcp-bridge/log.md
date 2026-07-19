@@ -17,6 +17,40 @@ Copy the template, fill it in, insert at the top of "Entries".
 
 ## Entries
 
+### 2026-07-19 — Emoji cycle (working→done) added as a post-complete enhancement
+- **Task:** T5.1–T5.6 (Phase 5)
+- **What happened:** user asked where the v1 bridge's "working on it" / "done"
+  emoji behavior went. It was absent because the MCP channel is a thin
+  push+tools layer with no lifecycle (Claude drives; nothing stamped unless
+  Claude called `react`). Added the bookends back, ported into the channel:
+  `_stamp_working(chat_id,message_id)` in `_push` (OnIt on receipt), and
+  `_finish_working(chat_id)` in the `reply` tool on successful send (Done +
+  remove OnIt). State kept in a bounded LRU `_REACTIONS` keyed by chat_id
+  (since `reply` takes chat_id but the emoji belong on the incoming message_id).
+- **Discovery / blocker:** none new. Live run earlier confirmed the full
+  pipeline works (message → push → `notifications/claude/channel` → Claude →
+  `mcp__feishu__reply`); the only live gotcha was an **orphaned `mcp_channel`
+  process** from a not-fully-exited prior session holding a second Feishu ws and
+  stealing messages — fixed by killing the orphan; documented the
+  "exit before relaunch" / `pgrep mcp_channel` hygiene.
+- **Resolution / workaround:** emoji cycle implemented + unit-tested (map
+  logic) + regression smoke green. PRD §4.8 + AC8 + decision D6; tasks Phase 5.
+- **PRD impact:** amended §3 (AC8), §4.8 (new), Appendix A (D6); Status →
+  live-verified + emoji-cycle.
+
+
+### 2026-07-19 — Shipped: committed + pushed; PR pending (no gh CLI)
+- **Task:** T4.2
+- **What happened:** committed `e539980 feat: replace tmux bridge with Feishu/Lark
+  MCP channel` on `feat/mcp-bridge` and pushed to origin
+  (github.com:iovoi/claude-code-lark-bridge.git). PR creation could not be automated
+  because the `gh` CLI is not installed in this environment.
+- **Resolution / workaround:** PR to be opened manually via
+  https://github.com/iovoi/claude-code-lark-bridge/pull/new/feat/mcp-bridge
+  (a ready title/body was provided to the user).
+- **PRD impact:** none.
+
+
 ### 2026-07-19 — T4.1 acceptance results
 - **Task:** T4.1
 - **AC1 (install + run):** PASS — `mcp==1.28.1` + transitive deps in requirements.txt;

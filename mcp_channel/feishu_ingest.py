@@ -51,6 +51,7 @@ def start_ws(on_message) -> threading.Thread:
         api.route_lark_logs_to_stderr()  # noqa: F401 (type hint for handler)
 
         def on_receive(data) -> None:
+            print(f"[ws] on_receive FIRED: type={type(data).__name__}", file=sys.stderr)
             try:
                 msg = data.event.message
                 sender = data.event.sender.sender_id.open_id

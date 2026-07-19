@@ -1,8 +1,8 @@
 # PRD: mcp-bridge (Feishu/Lark MCP channel)
 
-- **Status:** Implementation complete — AC1/2/7 verified offline; AC3-6 pending live verification (need a `claude --channels` session + real Feishu app)
+- **Status:** Live-verified (messages flow end-to-end via `claude --channels`); emoji-cycle enhancement added (working→done reactions)
 - **Feature dir:** `docs/mcp-bridge/`
-- **Created:** 2026-07-19 · **Last updated:** 2026-07-19 (implementation complete)
+- **Created:** 2026-07-19 · **Last updated:** 2026-07-19 (emoji-cycle enhancement)
 
 ## 0. Resume protocol
 If you are a new agent: read this `prd.md`, then `tasks.md`, then `log.md`, then
@@ -76,6 +76,10 @@ Each is independently verifiable.
    `mark_handled.py`, `pending_messages.py`, `react.py`, `send_message.py`) are
    deleted; `git ls-files` no longer lists them; `feishu_api.py` still imports
    cleanly.
+
+8. Emoji cycle: on receipt the channel stamps the working emoji (`OnIt`) on the
+   incoming message; when Claude's `reply` succeeds it stamps `Done` and removes
+   `OnIt`. (Live-observed via `[react] working on …` / `[react] done on …` logs.)
 
 ## 4. Detailed specification
 
@@ -185,6 +189,24 @@ Each is independently verifiable.
 - The channel inherits whatever tool permissions the launching `claude` session
   has; the channel itself only exposes `reply`/`react` (no filesystem/exec tools).
 
+## 4.8 Working → done emoji cycle
+Ports the v1 bridge's reaction bookends into the channel (which is otherwise a
+thin push+tools layer with no lifecycle of its own):
+- **On receipt** (`_push`, after access/stale checks, before the notification):
+  `_stamp_working(chat_id, message_id)` calls `feishu_api.add_reaction(
+  message_id, EMOJI_WORKING)` and records `(message_id, working_reaction_id)`
+  keyed by `chat_id` in a bounded LRU (`_REACTIONS`, cap 256, `_REACTION_LOCK`).
+- **On successful `reply`** (`call_tool` for `reply`, when `ok`):
+  `_finish_working(chat_id)` pops the entry, calls `add_reaction(message_id,
+  EMOJI_DONE)`, then `delete_reaction(message_id, working_reaction_id)`.
+- **Mapping note:** `reply` takes a `chat_id`, but the emoji belong on the
+  *incoming* `message_id`; the `_REACTIONS` map supplies it. One entry per chat
+  (latest incoming wins) — exact for one-message-per-chat-at-a-time.
+- **Config:** `FEISHU_EMOJI_WORKING` (default `OnIt`), `FEISHU_EMOJI_DONE`
+  (default `Done`) in `feishu_api.py`.
+- **Fail-soft:** a failed working stamp leaves `working_reaction_id=None`; done
+  still stamps, removal is skipped. Neither breaks the reply.
+
 ## 5. Architecture and file layout
 **New:**
 - `mcp_channel/__init__.py` — package marker.
@@ -251,6 +273,7 @@ Each is independently verifiable.
 | D3 | v1 bridge fate | (a) coexist (b) replace | (b) | user choice; cleaner end state, removes dead tmux code | 2026-07-19 |
 | D4 | Access control | (a) static .env allowlist (b) pairing+allowlist (c) none | (a) | simplest, fits .env style; pairing is v1 non-goal | 2026-07-19 |
 | D5 | v1 tools exposed | reply + react only (no edit_message/streaming) | reply + react | matches one-reply-per-turn v1 behavior; streaming card is non-goal | 2026-07-19 |
+| D6 | Working→done emoji | (a) auto in channel (_push/reply) (b) let Claude call react manually | (a) | faithful to v1 bridge; not dependent on Claude remembering to react | 2026-07-19 |
 
 ## Appendix B — Glossary
 - **MCP** — Model Context Protocol; JSON-RPC 2.0 over stdio between an MCP client

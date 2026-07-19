@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "feishu": {
-      "command": "/mnt/c/Users/wade/Desktop/workspace/lark-feishu-integration/.venv/bin/python",
+      "command": "${CLAUDE_PLUGIN_ROOT}/.venv/bin/python",
       "args": ["-m", "mcp_channel"]
     }
   }

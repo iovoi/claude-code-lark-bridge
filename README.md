@@ -58,6 +58,35 @@ claude --channels plugin:feishu@feishu-local
 Inbound Feishu messages (from allowlisted senders) now appear in that Claude
 session as user turns; Claude replies by calling the channel's `reply` tool.
 
+## Local dev mode (`server:feishu`)
+
+The channel-plugin **allowlist** (Anthropic-maintained) currently blocks
+plugin-installed channels for organization accounts, so the working path today
+is **local dev mode**, which bypasses the allowlist:
+
+1. Make the venv python reachable by the project `.mcp.json`. For dev mode,
+   `${CLAUDE_PLUGIN_ROOT}` isn't set, so point it at your venv (one-liner):
+   ```bash
+   .venv/bin/python - <<'PY'
+   import json, pathlib
+   py = str(pathlib.Path(".venv/bin/python").resolve())
+   pathlib.Path(".mcp.json").write_text(json.dumps(
+       {"mcpServers": {"feishu": {"command": py, "args": ["-m", "mcp_channel"]}}, indent=2))
+   PY
+   ```
+   (This is a local, uncommitted override — the repo keeps the portable
+   `${CLAUDE_PLUGIN_ROOT}/...` form above.)
+2. Allow the tools (one-time, in `~/.claude/settings.json`):
+   ```json
+   "permissions": { "allow": ["mcp__feishu__reply", "mcp__feishu__react"] }
+   ```
+3. Launch (always exit the previous session first, so no orphan lingers):
+   ```bash
+   claude --dangerously-load-development-channels server:feishu
+   ```
+   Channel logs tee to `/tmp/feishu-channel.log`. Wait ~1-2 min for
+   `connected to wss://msg-frontier.feishu.cn/…`, then DM the bot.
+
 ## Access control
 
 Without `FEISHU_ALLOWED_OPEN_IDS` / `FEISHU_ALLOWED_CHAT_IDS` set, the bot answers

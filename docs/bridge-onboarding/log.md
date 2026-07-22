@@ -15,6 +15,12 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — T4.2/T3.2/T4.3 commands + mode
+- **Task:** T4.2, T3.2, T4.3
+- **What:** plugin commands `/feishu:{up,status,stop,mode,doctor}` (`.claude-plugin/commands/feishu/*.md`) each invoke `python -m mcp_channel.launcher <sub>`. T4.3 `/feishu:mode <m>` calls `launcher mode` which stops B and relaunches with `--resume <session-id> --permission-mode <m>` (D7). `up`/`doctor` already wired to the doctor (T3.2 auto-at-bring-up).
+- **Note:** commands use `.venv/bin/python` (dev path). For a uvx/plugin-install invocation (no repo venv) the launcher entry point would differ — left as a TODO for the distribution path (allowlist-gated anyway).
+- **PRD impact:** none.
+
 ### 2026-07-23 — T4.1 DONE: launcher up/status/stop verified end-to-end (headless bridge UP)
 - **Task:** T4.1
 - **What:** `mcp_channel/launcher.py` — `up`/`status`/`stop`/`mode`/`keeper`. Verified: `up` ->

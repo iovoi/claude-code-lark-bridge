@@ -43,7 +43,7 @@
   - What: `run_doctor() -> int` — creds check, allowlist WARN, ws-connect probe (≤20s, cleanup), PASS/FAIL + hint per check; never print the secret. (PRD §4.4)
   - Acceptance: good creds → exit 0; bad creds → exit 1 with the creds FAIL line; ws-fail hints the scopes/event fix.
   - Depends on: T2.2
-- [ ] **T3.2** `/feishu:doctor` command + auto-at-bring-up
+- [x] **T3.2** `/feishu:doctor` command + auto-at-bring-up
   - Files: `.claude-plugin/commands/feishu/doctor.md`; `launcher.up` calls doctor before spawn.
   - Acceptance: `/feishu:doctor` runs the doctor; `/feishu:up` aborts with doctor output if creds missing.
   - Depends on: T3.1, T4.1
@@ -54,8 +54,8 @@
   - What: `up/status/stop` functions; POSIX `pty`+`os.setsid` detach, Windows `CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS`+`pywinpty`; PID file `~/.feishu-bridge/bridge.pid`; env `FEISHU_BRIDGE=1`; output→log; orphan pre-kill; poll log for `connected to wss`. CLI `python -m mcp_channel.launcher <cmd>`. (PRD §4.3)
   - Acceptance: `up` launches B detached (survives spawner `/exit`); `status` shows UP + tail; `stop` kills it; PID file managed. (PRD AC4/5)
   - Depends on: T0.1
-- [ ] **T4.2** commands `/feishu:up`, `/feishu:status`, `/feishu:stop`
-- [ ] **T4.3** session-id pinning + `/feishu:mode` respawn + bypass-allowlist
+- [x] **T4.2** commands `/feishu:up`, `/feishu:status`, `/feishu:stop`
+- [x] **T4.3** session-id pinning + `/feishu:mode` respawn + bypass-allowlist
   - Files: `mcp_channel/launcher.py`, `.claude-plugin/commands/feishu/mode.md`, `.claude-plugin/commands/feishu/up.md`
   - What: launcher pins B's session UUID (`--session-id`, stored in `~/.feishu-bridge/bridge.session`); `/feishu:up` refuses `bypassPermissions` when no allowlist set (PRD §4.3.1, AC8); `/feishu:mode <m>` stops B and relaunches with `--resume <uuid> --permission-mode <m>` (continuity). T-spike verifies `--resume`+`--channels` (PRD OQ3).
   - Acceptance: after an exchange, `/feishu:mode plan` respawns B with the same session UUID; history retained; bypass refused without allowlist.

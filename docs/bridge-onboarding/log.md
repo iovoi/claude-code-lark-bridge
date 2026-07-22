@@ -15,6 +15,11 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — setup skill `feishu-bridge` (agent-driven UX)
+- **Task:** enhancement (the original OQ2 'skill' ask)
+- **What:** added a skill `skills/feishu-bridge/SKILL.md` (plugin skill) AND installed a copy at `~/.claude/skills/feishu-bridge/` so it is immediately available without enabling the plugin. On 'set up/run/start/bring up/connect the feishu bridge' the agent does the WHOLE thing: preflight (python3/uv/claude), gather creds (APP_ID/SECRET, optional open_id), write .env, run `python3 -m mcp_channel.launcher up` (or `--mode auto` without an allowlist), report. Also handles 'stop/status/mode/doctor'. The user only provides credentials when asked — no manual commands. Resolves OQ2 (commands for direct control; skill for conversational setup).
+- **PRD impact:** OQ2 resolved (both: commands + a setup skill). Repo path is hardcoded to this machine in the skill body — for distribution, template it (git root / $CLAUDE_PLUGIN_ROOT).
+
 ### 2026-07-23 — Phase 6 done: feature complete (all tasks)
 - **Task:** T6.1–T6.3
 - **What:** README Quick-start (bridge launcher) section. All 6 phases complete; all tasks checked.

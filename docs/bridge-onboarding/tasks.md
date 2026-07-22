@@ -78,9 +78,9 @@
   - Depends on: —
 
 ## Phase 6 — Docs & verify
-- [ ] **T6.1** README onboarding section (uvx + userConfig + /feishu:up flow)
+- [x] **T6.1** README onboarding section (uvx + userConfig + /feishu:up flow)
   - Files: `README.md`
   - Acceptance: README documents the new one-command path.
   - Depends on: T1–T5
-- [ ] **T6.2** Run every PRD §3 acceptance criterion; record results in log.md.
-- [ ] **T6.3** `prd.md` Status → Complete; final log.md summary; commit + push `feat/bridge-onboarding`.
+- [x] **T6.2** Run every PRD §3 acceptance criterion; record results in log.md.
+- [x] **T6.3** `prd.md` Status → Complete; final log.md summary; commit + push `feat/bridge-onboarding`.

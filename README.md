@@ -38,6 +38,28 @@ cp .env.example .env
 # edit .env: set FEISHU_APP_ID, FEISHU_APP_SECRET, and (recommended) an allowlist
 ```
 
+## Quick start (bridge launcher — recommended)
+
+Once deps are installed (`pip install -r requirements.txt` or via `uvx`) and `.env`
+/ `userConfig` creds + an allowlist are set, you don't type the long `claude --channels`
+command — use the launcher commands:
+
+- `/feishu:up` — launch the bridge as a **detached, headless** `claude` session (PTY +
+  auto-confirm of the dev-channels and bypass dialogs) and connect the Feishu websocket.
+  Reports `bridge UP (pid …); Feishu websocket connected.` Default mode `bypassPermissions`
+  (**requires an allowlist** — the trust boundary); `/feishu:up` refuses without one.
+- `/feishu:status` — is the bridge up? + last channel log lines.
+- `/feishu:stop` — stop the bridge + reap any orphan.
+- `/feishu:mode plan|auto|acceptEdits|bypassPermissions` — restart the bridge in a new
+  permission mode, **resuming the same session** (conversation continuity preserved).
+- `/feishu:doctor` — validate creds, allowlist, and the websocket connect; fails loudly
+  with the exact fix (e.g. missing scope / event subscription).
+
+Under the hood these run `python -m mcp_channel.launcher <cmd>`. The bridge (B) is a
+separate, detached session — it keeps running independently of the session that launched
+it; channel output is teed to `/tmp/feishu-channel.log`. See `docs/bridge-onboarding/`
+for the full design.
+
 ## Run
 
 Register the channel via the local **marketplace**, then launch a session with the

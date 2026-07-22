@@ -15,6 +15,12 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — Phase 6 done: feature complete (all tasks)
+- **Task:** T6.1–T6.3
+- **What:** README Quick-start (bridge launcher) section. All 6 phases complete; all tasks checked.
+- **Acceptance status:** AC1 uvx build/run ✓; AC2 userConfig+cred precedence ✓; AC3 doctor ✓; AC4/5 up/status/stop ✓ (bridge UP + ws connected + clean stop); AC6 no orphan ✓; AC8 bypass-mandatory-allowlist ✓ (REFUSED). AC7 (Windows pywinpty path) — code present, not live-tested (Linux env). AC9 (`/feishu:mode` `--resume` session continuity) — launcher has it (OQ3); not live-verified.
+- **PRD impact:** Status -> Complete.
+
 ### 2026-07-23 — T5.1/T5.2 cleanup hardening
 - **Task:** T5.1, T5.2
 - **What:** T5.1 `mcp_channel/__main__.run()` calls `prctl(PR_SET_PDEATHSIG, SIGTERM)` on Linux so the channel server self-dies if its parent (claude B) dies. T5.2 `.claude-plugin/hooks.json` SessionEnd hook (scoped to FEISHU_BRIDGE=1) reaps `feishu-channel`/`mcp_channel` when B exits. Belt-and-suspenders against the orphan class seen earlier.

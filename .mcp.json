@@ -2,7 +2,7 @@
   "mcpServers": {
     "feishu": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/iovoi/claude-code-lark-bridge", "feishu-channel"]
+      "args": ["--from", ".", "feishu-channel"]
     }
   }
 }

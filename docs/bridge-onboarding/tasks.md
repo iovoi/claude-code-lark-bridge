@@ -49,7 +49,7 @@
   - Depends on: T3.1, T4.1
 
 ## Phase 4 — launcher + commands (bring-up lifecycle)
-- [ ] **T4.1** `mcp_channel/launcher.py` (cross-platform detach + PTY)
+- [x] **T4.1** `mcp_channel/launcher.py` (cross-platform detach + PTY)
   - Files: `mcp_channel/launcher.py` (new)
   - What: `up/status/stop` functions; POSIX `pty`+`os.setsid` detach, Windows `CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS`+`pywinpty`; PID file `~/.feishu-bridge/bridge.pid`; env `FEISHU_BRIDGE=1`; output→log; orphan pre-kill; poll log for `connected to wss`. CLI `python -m mcp_channel.launcher <cmd>`. (PRD §4.3)
   - Acceptance: `up` launches B detached (survives spawner `/exit`); `status` shows UP + tail; `stop` kills it; PID file managed. (PRD AC4/5)

@@ -15,6 +15,38 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — T4.1 DONE: launcher up/status/stop verified end-to-end (headless bridge UP)
+- **Task:** T4.1
+- **What:** `mcp_channel/launcher.py` — `up`/`status`/`stop`/`mode`/`keeper`. Verified: `up` ->
+  doctor (creds) -> spawn detached PTY-keeper -> auto-confirm dialogs -> claude reaches main
+  interface -> uvx `feishu-channel` server spawns -> `connected to wss://msg-frontier.feishu.cn`
+  -> `up` reports "bridge UP (pid …); Feishu websocket connected." `status` -> UP + log tail;
+  `stop` -> clean (no orphan uvx/claude/keeper). Default mode bypassPermissions (mandatory
+  allowlist); --dangerously-skip-permissions flag + --session-id pin; --resume on mode-change.
+- **Discovery / blocker (the hard part — TWO startup dialogs, both must be auto-confirmed):**
+  (1) **No-TTY -> claude forces --print -> exits.** A PTY is mandatory.
+  (2) `--dangerously-load-development-channels` shows a dev-channels dialog: option 1
+  "I am using this for local development" -> **Enter** confirms (default option 1).
+  (3) `--dangerously-skip-permissions` shows a SECOND dialog: "1. No, exit / 2. Yes, I accept"
+  (option 1 = No,exit is DEFAULT). `skipDangerousModePermissionPrompt:true` in settings does
+  **NOT** suppress it — the keeper must select option 2: send **`2\r`** (number-select) then a
+  Down+Enter fallback (`\x1b[B\r`).
+  (4) **ANSI cursor-escapes strip spaces** ("localdevelopment", "Yes,Iaccept") — match
+  space-less single-word keywords; key the bypass handler on `Yes,Iaccept`/`No,exit`, NOT
+  `Bypass` (which appears in the informational mode-WARNING -> would misfire and exit).
+  (5) `.mcp.json` uses **`uvx --from . feishu-channel`** (local) for dev/server:feishu — the
+  `git+url` form needs pyproject on `main` (not yet merged). uvx builds the local package +
+  runs the entry point; ws connects.
+  (6) `up` poll deadline = 240s (claude boots slow on /mnt/c; faster on native FS / uvx cache).
+  (7) `b"development"` etc. must be matched on BYTES with a BYTES regex (`rb"…"`) — a string
+  pattern on bytes raised TypeError.
+- **Resolution:** keeper = PTY + dialog-aware auto-confirm (dev Enter; bypass `2\r`+Down+Enter)
+  + tee; launcher `up` sets skipDangerousModePermissionPrompt (harmless even though insufficient)
+  + spawns keeper detached + polls the log for `connected to wss`.
+- **PRD impact:** amended §4.3.1 — the keeper handles BOTH dialogs (not just dev); bypass needs
+  the `2\r` keystroke (skipDangerousModePermissionPrompt alone doesn't suppress it). D6 stands.
+
+
 ### 2026-07-23 — T3.1 done: doctor.py
 - **Task:** T3.1
 - **What:** `mcp_channel/doctor.py` — `check_creds` (cli_ prefix + secret, never prints it), `check_allowlist` (WARN if unset), `check_ws` (lazy lark; Lark-log tripwire detects 'connected to wss' within 20s; daemon-thread probe self-cleans). `run_doctor(include_ws=True)` + `--no-ws` flag (fast creds/allowlist path for bring-up). Exit 0 ok / 1 fail.

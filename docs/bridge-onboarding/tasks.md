@@ -38,7 +38,7 @@
   - Depends on: —
 
 ## Phase 3 — doctor (point 4)
-- [ ] **T3.1** `mcp_channel/doctor.py`
+- [x] **T3.1** `mcp_channel/doctor.py`
   - Files: `mcp_channel/doctor.py` (new)
   - What: `run_doctor() -> int` — creds check, allowlist WARN, ws-connect probe (≤20s, cleanup), PASS/FAIL + hint per check; never print the secret. (PRD §4.4)
   - Acceptance: good creds → exit 0; bad creds → exit 1 with the creds FAIL line; ws-fail hints the scopes/event fix.

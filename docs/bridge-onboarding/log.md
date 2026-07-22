@@ -15,6 +15,12 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — T3.1 done: doctor.py
+- **Task:** T3.1
+- **What:** `mcp_channel/doctor.py` — `check_creds` (cli_ prefix + secret, never prints it), `check_allowlist` (WARN if unset), `check_ws` (lazy lark; Lark-log tripwire detects 'connected to wss' within 20s; daemon-thread probe self-cleans). `run_doctor(include_ws=True)` + `--no-ws` flag (fast creds/allowlist path for bring-up). Exit 0 ok / 1 fail.
+- **Acceptance:** bad creds -> FAIL creds + WARN allowlist + exit 1; real .env creds -> PASS creds.
+- **PRD impact:** none (matches §4.4). T3.2 (command + bring-up wiring) deferred to after the launcher (Phase 4).
+
 ### 2026-07-23 — Phase 2 done: T2.1 + T2.2 (userConfig + cred resolver)
 - **Task:** T2.1, T2.2
 - **What:** `.claude-plugin/plugin.json` declares `userConfig` (FEISHU_APP_ID, FEISHU_APP_SECRET [sensitive], FEISHU_ALLOWED_OPEN_IDS, FEISHU_ALLOWED_CHAT_IDS) — Claude Code prompts at enable, injects as `CLAUDE_PLUGIN_OPTION_*`. `feishu_api.cred(key)` resolves `CLAUDE_PLUGIN_OPTION_<key>` first then classic `<key>` (env/.env); APP_ID/SECRET + access.py allowlists all go through it. Bumped plugin version 0.1.0 -> 0.2.0.

@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ \"${FEISHU_BRIDGE:-}\" = \"1\" ] && pkill -f 'feishu-channel|python.*-m mcp_channel' 2>/dev/null; true"
+          }
+        ]
+      }
+    ]
+  }
+}

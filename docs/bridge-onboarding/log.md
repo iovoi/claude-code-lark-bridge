@@ -15,6 +15,11 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — T5.1/T5.2 cleanup hardening
+- **Task:** T5.1, T5.2
+- **What:** T5.1 `mcp_channel/__main__.run()` calls `prctl(PR_SET_PDEATHSIG, SIGTERM)` on Linux so the channel server self-dies if its parent (claude B) dies. T5.2 `.claude-plugin/hooks.json` SessionEnd hook (scoped to FEISHU_BRIDGE=1) reaps `feishu-channel`/`mcp_channel` when B exits. Belt-and-suspenders against the orphan class seen earlier.
+- **PRD impact:** none (matches §4.3 cleanup).
+
 ### 2026-07-23 — T4.2/T3.2/T4.3 commands + mode
 - **Task:** T4.2, T3.2, T4.3
 - **What:** plugin commands `/feishu:{up,status,stop,mode,doctor}` (`.claude-plugin/commands/feishu/*.md`) each invoke `python -m mcp_channel.launcher <sub>`. T4.3 `/feishu:mode <m>` calls `launcher mode` which stops B and relaunches with `--resume <session-id> --permission-mode <m>` (D7). `up`/`doctor` already wired to the doctor (T3.2 auto-at-bring-up).

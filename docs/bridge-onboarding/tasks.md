@@ -66,12 +66,12 @@
   - Depends on: T4.1
 
 ## Phase 5 — cleanup hardening (no orphan)
-- [ ] **T5.1** parent-death signal in the channel server (Linux)
+- [x] **T5.1** parent-death signal in the channel server (Linux)
   - Files: `mcp_channel/__main__.py`
   - What: `prctl(PR_SET_PDEATHSIG, SIGTERM)` guarded to Linux so the server dies if B dies. (PRD §4.3)
   - Acceptance: code present + guarded; server still starts.
   - Depends on: —
-- [ ] **T5.2** SessionEnd orphan-kill hook (scoped to FEISHU_BRIDGE=1)
+- [x] **T5.2** SessionEnd orphan-kill hook (scoped to FEISHU_BRIDGE=1)
   - Files: `.claude-plugin/hooks.json`
   - What: SessionEnd hook runs `pkill -f 'feishu-channel|python.*-m mcp_channel'` only when `$FEISHU_BRIDGE` set. (PRD §4.3)
   - Acceptance: hook JSON valid; matches FEISHU_BRIDGE guard.

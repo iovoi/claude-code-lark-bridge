@@ -39,8 +39,22 @@ class _Tee:
         return getattr(self._primary, name)
 
 
+def _enable_parent_death_signal() -> None:
+    """On Linux, ask the kernel to SIGTERM us if our parent (the claude bridge session)
+    dies — prevents an orphaned channel server when B is killed forcefully."""
+    try:
+        import ctypes, platform, signal
+        if platform.system() != "Linux":
+            return
+        libc = ctypes.CDLL("libc.so.6")
+        libc.prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG = 1
+    except Exception:
+        pass
+
+
 def run() -> None:
     """Console entry point + `python -m mcp_channel` target."""
+    _enable_parent_death_signal()
     real = sys.stderr
     log_path = os.environ.get("FEISHU_CHANNEL_LOG", "/tmp/feishu-channel.log")
     try:

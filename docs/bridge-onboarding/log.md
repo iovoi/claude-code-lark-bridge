@@ -15,6 +15,12 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — Phase 2 done: T2.1 + T2.2 (userConfig + cred resolver)
+- **Task:** T2.1, T2.2
+- **What:** `.claude-plugin/plugin.json` declares `userConfig` (FEISHU_APP_ID, FEISHU_APP_SECRET [sensitive], FEISHU_ALLOWED_OPEN_IDS, FEISHU_ALLOWED_CHAT_IDS) — Claude Code prompts at enable, injects as `CLAUDE_PLUGIN_OPTION_*`. `feishu_api.cred(key)` resolves `CLAUDE_PLUGIN_OPTION_<key>` first then classic `<key>` (env/.env); APP_ID/SECRET + access.py allowlists all go through it. Bumped plugin version 0.1.0 -> 0.2.0.
+- **Acceptance:** cred precedence unit-tested (CLAUDE_PLUGIN_OPTION_* wins; classic fallback); allowlist resolves via userConfig.
+- **PRD impact:** none (matches §4.1).
+
 ### 2026-07-23 — Phase 1 (uvx) done: T1.2 + T1.3
 - **Task:** T1.2, T1.3
 - **What:** `.mcp.json` -> `uvx --from git+https://github.com/iovoi/claude-code-lark-bridge feishu-channel`.

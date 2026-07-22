@@ -7,13 +7,15 @@ guarantees that (feishu_api is imported first).
 import os
 import sys
 
+import feishu_api
+
 
 def _split(v: str | None) -> set[str]:
     return {x.strip() for x in (v or "").split(",") if x.strip()}
 
 
-ALLOWED_OPEN_IDS = _split(os.environ.get("FEISHU_ALLOWED_OPEN_IDS"))
-ALLOWED_CHAT_IDS = _split(os.environ.get("FEISHU_ALLOWED_CHAT_IDS"))
+ALLOWED_OPEN_IDS = _split(feishu_api.cred("FEISHU_ALLOWED_OPEN_IDS"))
+ALLOWED_CHAT_IDS = _split(feishu_api.cred("FEISHU_ALLOWED_CHAT_IDS"))
 _warned = False
 
 

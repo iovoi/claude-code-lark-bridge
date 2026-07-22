@@ -26,12 +26,12 @@
   - Depends on: T1.1, T1.2 (and the commit pushed so git has pyproject)
 
 ## Phase 2 — userConfig + creds (point 2)
-- [ ] **T2.1** `plugin.json` userConfig
+- [x] **T2.1** `plugin.json` userConfig
   - Files: `.claude-plugin/plugin.json`
   - What: add `userConfig` for FEISHU_APP_ID (sensitive), FEISHU_APP_SECRET (sensitive), FEISHU_ALLOWED_OPEN_IDS, FEISHU_ALLOWED_CHAT_IDS with descriptions/types. (PRD §4.1, §4.5)
   - Acceptance: valid JSON; `userConfig` has the 4 keys; secret fields `sensitive:true`.
   - Depends on: —
-- [ ] **T2.2** `feishu_api.resolve_creds()` reads CLAUDE_PLUGIN_OPTION_* first
+- [x] **T2.2** `feishu_api.resolve_creds()` reads CLAUDE_PLUGIN_OPTION_* first
   - Files: `feishu_api.py`
   - What: resolve APP_ID/SECRET/allowlist from `CLAUDE_PLUGIN_OPTION_FEISHU_*` first, then classic `FEISHU_*`. Unit-test the precedence. (PRD §4.1, §4.5)
   - Acceptance: unit test — set `CLAUDE_PLUGIN_OPTION_FEISHU_APP_ID`, assert it overrides `FEISHU_APP_ID`.

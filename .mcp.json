@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "feishu": {
-      "command": ".venv/bin/python",
-      "args": ["-m", "mcp_channel"]
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/iovoi/claude-code-lark-bridge", "feishu-channel"]
     }
   }
 }

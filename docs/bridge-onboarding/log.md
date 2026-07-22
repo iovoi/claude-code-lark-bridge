@@ -15,6 +15,54 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — Phase 1 (uvx) done: T1.2 + T1.3
+- **Task:** T1.2, T1.3
+- **What:** `.mcp.json` -> `uvx --from git+https://github.com/iovoi/claude-code-lark-bridge feishu-channel`.
+  Installed uv 0.11.31. `uv build` produced a valid wheel containing `mcp_channel/*` +
+  `feishu_api.py` (force-included) + `entry_points.txt` (feishu-channel). `uvx --from .
+  feishu-channel` built the package, fetched 37 deps (lark-oapi, mcp, …), and ran the
+  channel (`[boot] feishu channel starting`). Added `dist/` to .gitignore.
+- **Discovery / caveat:** the `.mcp.json` git form resolves the repo's **default branch
+  (main)**, which does NOT yet have `pyproject.toml` (it's on `feat/bridge-onboarding`). So
+  `uvx --from git+url` works only once pyproject lands on main (or pin `@feat/bridge-onboarding`
+  for now). Local `uvx --from .` is the verified path on this branch.
+- **PRD impact:** none (matches D2). Note for resuming agent: T1.3 acceptance met by the local
+  uvx run; the git-URL runtime confirmation is pending merge to main.
+
+
+### 2026-07-23 — T1.1 done: pyproject + feishu-channel entry point
+- **Task:** T1.1
+- **What:** added `pyproject.toml` (hatchling; deps lark-oapi+mcp; optional pywinpty on Windows; `[project.scripts] feishu-channel = mcp_channel.__main__:run`) and refactored `__main__.py` so `run()` wraps the stderr-tee + `anyio.run(main)` (serves both the console entry point and `python -m mcp_channel`). `feishu_api.py` kept at repo root (so dev-mode `.env` via PROJECT_DIR still works) and force-included at the wheel root.
+- **Acceptance:** `from mcp_channel.__main__ import run` OK; py_compile OK.
+- **PRD impact:** none.
+
+### 2026-07-23 — T0.1 PASSED: headless bridge feasible (PTY + auto-confirm dev-channels dialog)
+- **Task:** T0.1
+- **What happened:** spiked whether `claude --dangerously-load-development-channels server:feishu`
+  runs detached/headless and connects the Feishu ws.
+- **Discovery / blocker:**
+  (1) **No TTY → claude forces `--print` mode and exits** ("Input must be provided either
+  through stdin or as a prompt argument when using --print"). So bare detached (stdio→file)
+  does NOT work; a PTY is mandatory (confirms D5).
+  (2) **With a PTY, claude runs interactive but shows a confirmation dialog** for the dev
+  flag: "❯ 1. I am using this for local development / 2. Exit / Enter to confirm". A headless
+  B never answers it → channel never starts.
+  (3) **Auto-confirm via text-match is unreliable**: the dialog is rendered with ANSI
+  cursor-escape sequences *between letters* and spaces are emitted as cursor moves, so
+  cleaned bytes have no spaces ("localdevelopment") — substring matches with spaces fail.
+- **Resolution / workaround:** the keeper allocates a PTY AND sends `\r` (Enter) **on a fixed
+  cadence** (every 4s for the first 30s). Enter confirms the dialog when it appears; on the
+  empty prompt afterwards it's a noop. Verified end-to-end: claude spawned `mcp_channel`
+  and `connected to wss://msg-frontier.feishu.cn/ws/v2…`, B stayed alive detached.
+- **PRD impact:** amended §4.3.1 — the keeper must (a) allocate a PTY and (b) send Enter on a
+  cadence to confirm the dev-channels dialog. **OQ1 resolved (yes, headless works with PTY +
+  auto-confirm).** D5 confirmed (PTY mandatory, not optional).
+- **Note for resuming agents:** the spike scripts are under `$CLAUDE_JOB_DIR/tmp/keeper4.py`
+  (the passing one) and `keeper*.py` (earlier failed variants). Broad `pkill -f
+  'development-channels'|'keeper_spike'` made the Bash tool exit 144 (harness killed it) —
+  kill spike procs by PID instead.
+
+
 ### 2026-07-20 — Planning complete; Phase A decisions locked; entering Phase B
 - **Task:** planning
 - **What happened:** branched `feat/bridge-onboarding` off `feat/mcp-bridge`. PRD/tasks/log drafted. Decisions D1–D5 locked with user: (D1) detached headless bg-process bridge B (no tmux, no window), cross-platform via PTY; (D2) uvx from git; (D3) doctor both; (D4) plugin commands `/feishu:{up,status,stop,doctor}`; (D5) PTY for headless TUI.

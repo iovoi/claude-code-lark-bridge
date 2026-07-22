@@ -1,9 +1,10 @@
 """Entry point for the Feishu MCP channel.
 
-Also tees sys.stderr to a file (default /tmp/feishu-channel.log, override via
-FEISHU_CHANNEL_LOG) so the channel's [boot]/[ws]/[access]/[push] logs are
-inspectable even when launched as a child process whose stderr is captured by
-the host (which may only surface the first line)."""
+`run()` is the console entry point (`feishu-channel`) and the `python -m mcp_channel`
+target. It tees sys.stderr to a file (default /tmp/feishu-channel.log, override via
+FEISHU_CHANNEL_LOG) so the channel's [boot]/[ws]/[access]/[push] logs are inspectable
+even when launched as a child process whose stderr is captured by the host (which may
+only surface the first line)."""
 import os
 import sys
 
@@ -38,16 +39,18 @@ class _Tee:
         return getattr(self._primary, name)
 
 
-_real_stderr = sys.stderr
-_log_path = os.environ.get("FEISHU_CHANNEL_LOG", "/tmp/feishu-channel.log")
-try:
-    _log_file = open(_log_path, "a", buffering=1)
-    sys.stderr = _Tee(_real_stderr, _log_file)
-except Exception as _e:  # pragma: no cover
-    _real_stderr.write(f"[tee] could not open {_log_path}: {_e}\n")
+def run() -> None:
+    """Console entry point + `python -m mcp_channel` target."""
+    real = sys.stderr
+    log_path = os.environ.get("FEISHU_CHANNEL_LOG", "/tmp/feishu-channel.log")
+    try:
+        sys.stderr = _Tee(real, open(log_path, "a", buffering=1))
+    except Exception as e:  # pragma: no cover
+        real.write(f"[tee] could not open {log_path}: {e}\n")
+    import anyio
+    from .server import main
+    anyio.run(main)
 
-import anyio
-from .server import main
 
 if __name__ == "__main__":
-    anyio.run(main)
+    run()

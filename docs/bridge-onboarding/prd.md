@@ -60,6 +60,7 @@ bridge session (no tmux, no terminal window, cross-platform) plus status/stop.
   1. Orphan check: `pgrep -f 'feishu-channel|python.*-m mcp_channel'`; kill strays not matching the recorded PID.
   2. Ensure creds present (run doctor's cred check); if missing → print which, abort.
   3. Detach-spawn B: POSIX → `os.setsid` + `pty.fork`/`subprocess.Popen(start_new_session=True)` with a PTY; Windows → `subprocess.Popen(creationflags=CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS)` + `pywinpty`. B's stdout/stderr → log. Env `FEISHU_BRIDGE=1`. cwd = repo root.
+  3b. **Auto-confirm the dev-channels dialog:** the keeper sends `\r` (Enter) to the PTY on a fixed cadence (every 4s for ~30s) — confirms "I am using this for local development"; noop on the empty prompt. (Text-matching is unreliable: ANSI strips spaces.)
   4. Write `~/.feishu-bridge/bridge.pid`.
   5. Poll the log up to ~120s for `connected to wss://msg-frontier.feishu.cn`; report UP + chat_id hint, or the doctor failure if it doesn't connect.
 - **`/feishu:status`**: read PID file; `os.kill(pid,0)`; tail last ~15 log lines.
@@ -122,7 +123,7 @@ Reuses: `feishu_api.client/send_text/add_reaction`, `mcp_channel/server.py`, `fe
 - **AC7:** launcher detach code path selected by `platform.system()`; Windows path unit-checkable by importing the function (mock pywinpty).
 
 ## 8. Open questions
-- **OQ1 (T0 spike):** does `claude --dangerously-load-development-channels server:feishu` run correctly **headless** (PTY, no human attached, B survives parent `/exit`)? If claude exits without a real terminal, the launcher must keep the PTY open for B's lifetime (a small keeper). Resolved in T0 → log + Appendix A.
+- **OQ1 (RESOLVED, T0):** claude needs a PTY (no-TTY → --print → exit) AND shows a dev-channels confirmation dialog that the keeper auto-confirms via fixed-cadence Enter. Headless works; B spawns mcp_channel + connects the ws.
 - **OQ2:** confirm bridge actions as plugin **commands** vs skills — commands chosen (deterministic launchers); the agent can still invoke them. (User said "skill"; confirm at review.)
 - **OQ3 (T-spike):** verify `claude --resume <uuid> --permission-mode <mode> --channels …` (or dev-flag form) actually resumes the session and applies the mode (D7). If `--resume`+`--channels` is incompatible, fall back to `--session-id <uuid>` re-pin.
 - **Caveats (bugs):** permission relay is broken on the dev path (anthropics/claude-code#40064) → we must use a non-prompting mode (D6). `--dangerously-skip-permissions` can silently downgrade to acceptEdits after long runs (#43613) → B may need periodic restart; document.

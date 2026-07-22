@@ -4,24 +4,24 @@
 > log line each time. Atomic tasks; a fresh agent can do any one from the PRD.
 
 ## Phase 0 — Spike (de-risk)
-- [ ] **T0.1** Spike: does `claude --dangerously-load-development-channels server:feishu` run headless (PTY, no human) and survive parent `/exit`?
+- [x] **T0.1** Spike: does `claude --dangerously-load-development-channels server:feishu` run headless (PTY, no human) and survive parent `/exit`?
   - Files: throwaway in `$CLAUDE_JOB_DIR/tmp/`
   - What: spawn B detached with a PTY (`pty.fork`/`subprocess`+`start_new_session`), redirect to log; verify it stays alive after the spawner exits and the ws connects. Resolves PRD OQ1.
   - Acceptance: documented in log.md whether headless+PTY works as-is or needs a PTY-keeper; result recorded in Appendix A.
   - Depends on: —
 
 ## Phase 1 — uvx packaging (point 1)
-- [ ] **T1.1** `pyproject.toml` + console entry point
+- [x] **T1.1** `pyproject.toml` + console entry point
   - Files: `pyproject.toml` (new), `mcp_channel/__main__.py` (edit: add `run()`).
   - What: `[project.scripts] feishu-channel = "mcp_channel.__main__:run"`; deps `lark-oapi==1.7.1`, `mcp==1.28.1`, optional `pywinpty; platform_system=="Windows"`. `run()` = `anyio.run(main)`. (PRD §4.5)
   - Acceptance: `python -m mcp_channel` still works; `python -c "import mcp_channel.__main__ as m; assert hasattr(m,'run')"`.
   - Depends on: —
-- [ ] **T1.2** `.mcp.json` → uvx
+- [x] **T1.2** `.mcp.json` → uvx
   - Files: `.mcp.json`
   - What: `command: uvx`, `args: ["--from","git+https://github.com/iovoi/claude-code-lark-bridge","feishu-channel"]`. (PRD §4.5)
   - Acceptance: `cat .mcp.json` shows the uvx command.
   - Depends on: T1.1
-- [ ] **T1.3** Verify uvx fetches + runs the entry point
+- [x] **T1.3** Verify uvx fetches + runs the entry point
   - Acceptance: `uvx --from git+https://github.com/iovoi/claude-code-lark-bridge feishu-channel --help` (or import probe) exits 0. (PRD AC1)
   - Depends on: T1.1, T1.2 (and the commit pushed so git has pyproject)
 

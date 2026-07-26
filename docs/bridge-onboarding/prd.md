@@ -43,6 +43,9 @@ bridge session (no tmux, no terminal window, cross-platform) plus status/stop.
 7. Works on Linux/macOS (POSIX `pty` detach) and the launcher has a Windows code path (`pywinpty` / `CREATE_NEW_PROCESS_GROUP`).
 8. `/feishu:up` refuses to launch B in `bypassPermissions` when no allowlist is set (mandatory-allowlist rule).
 9. `/feishu:mode plan` (after a prior exchange) respawns B with the **same session id**; B's history still contains the pre-change exchange; new messages continue that session.
+10. `install.py` (via `install.sh`) creates `~/.chat_bridge/{venv,repo}`, `pip install uv` into the venv, fetches the repo (git-clone if git present, else curl tarball), rewrites `.mcp.json` to the venv uvx, and installs the `feishu-bridge` skill to `~/.claude/skills/`.
+11. `run-bridge.sh` launches the bridge (calls `launcher up` with the venv python + repo cwd).
+12. AC7: the launcher `keeper()` dispatches on `platform.system()` — a Windows pywinpty code path exists (py_compile clean); runtime verification on Windows pending.
 
 ## 4. Detailed specification
 
@@ -105,7 +108,7 @@ bridge session (no tmux, no terminal window, cross-platform) plus status/stop.
 - Doctor never prints the secret value (only PASS/FAIL).
 
 ## 5. Architecture and file layout
-**New:** `pyproject.toml`; `mcp_channel/launcher.py`; `mcp_channel/doctor.py`; `.claude-plugin/commands/feishu/{up,status,stop,doctor}.md`; `.claude-plugin/hooks.json`.
+**New:** `pyproject.toml`; `mcp_channel/launcher.py` (POSIX + Windows pywinpty keeper); `mcp_channel/doctor.py`; `.claude-plugin/commands/feishu/{up,status,stop,doctor}.md`; `.claude-plugin/hooks.json`; `install.py` + `install.sh` + `install.bat` (installer); `run-bridge.sh` + `run-bridge.bat` (launch wrappers); `skills/feishu-bridge/SKILL.md` (agent-driven setup/run skill).
 **Modified:** `mcp_channel/__main__.py` (run() entry point); `feishu_api.py` (resolve_creds + CLAUDE_PLUGIN_OPTION_*); `.mcp.json` (uvx); `.claude-plugin/plugin.json` (userConfig); `README.md` (new onboarding section).
 Reuses: `feishu_api.client/send_text/add_reaction`, `mcp_channel/server.py`, `feishu_ingest.py`, `access.py`.
 
@@ -139,6 +142,10 @@ Reuses: `feishu_api.client/send_text/add_reaction`, `mcp_channel/server.py`, `fe
 | D6 | B permission mode | (a) auto (b) bypassPermissions+allowlist (c) acceptEdits | (b) | matches wild bridges (zarazhangrui `full`/modelzen `never`); headless must not hang; allowlist is the trust boundary | 2026-07-20 |
 | D7 | mode change | (a) restart fresh (b) respawn same session via --resume | (b) | preserves conversation continuity across mode switches | 2026-07-20 |
 | D8 | dev-flag exposure | always dev vs auto-fallback to clean --channels | auto-fallback | clean where allowlist allows (non-org/admin); invisible to user either way | 2026-07-20 |
+| D9 | installer shape | (a) install.py (b) install.sh+install.ps1 | install.py + thin install.sh/install.bat wrappers | python is a prereq anyway; one real cross-platform script | 2026-07-23 |
+| D10 | install flow | (a) ~/.chat_bridge venv+pip-uv (b) global uv | (a) | isolation; uv via pip in venv; git-first (auto-update) else curl; **no lark/feishu check** (skill prompts for creds) | 2026-07-23 |
+| D11 | agent-launched lifecycle | (a) detached+survives (D1) (b) stop on agent exit | detached BUT agent stops it on its own exit (skill-driven, agent-launched only); manual launches left alone | clean session for agent-launched; manual users keep always-on | 2026-07-23 |
+| D12 | Windows PTY (AC7) | (a) WSL2 only (b) pywinpty port | (b) | native-Windows support; keeper dispatches on platform.system() -> pywinPTY on Windows; code present, **untested** (no Windows env) | 2026-07-23 |
 
 ## Appendix B — Glossary
 - **B / the bridge**: the detached headless `claude --channels` session that hosts the Feishu channel.

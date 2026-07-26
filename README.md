@@ -38,6 +38,25 @@ cp .env.example .env
 # edit .env: set FEISHU_APP_ID, FEISHU_APP_SECRET, and (recommended) an allowlist
 ```
 
+## Installation
+
+One command (Linux/macOS/WSL; installs under `~/.chat_bridge`, creates a venv + `uv`, fetches
+the repo, and installs the `feishu-bridge` run skill into the agent):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iovoi/claude-code-lark-bridge/main/install.sh | bash
+# or, after cloning:  ./install.sh
+```
+
+(Windows: `install.bat`, which calls `install.py`. Native-Windows bring-up needs the pywinpty
+PTY path — WSL2 is the supported Windows path today.)
+
+Prerequisites the installer checks: **Python ≥3.10** and **Claude Code** (`claude`) — it stops
+and tells you to install them if missing. It does **not** need git (falls back to curl) or any
+`pip install` of the bridge deps (uvx fetches them at runtime). After install, in any Claude
+session just say **"run the feishu bridge"** (and have your Feishu APP_ID/SECRET ready) — the
+installed skill configures `.env` and launches the bridge for you.
+
 ## Quick start (bridge launcher — recommended)
 
 Once deps are installed (`pip install -r requirements.txt` or via `uvx`) and `.env`

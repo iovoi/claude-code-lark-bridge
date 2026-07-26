@@ -15,6 +15,22 @@ Copy the template, fill, insert at top of "Entries".
 
 ## Entries
 
+### 2026-07-23 — Phase 7: installer + run-bridge + AC7 (Windows) + skill/README wiring
+- **Tasks:** T7.1–T7.5
+- **What:** `install.py` (cross-platform installer: preflight python/claude, mkdir ~/.chat_bridge,
+  venv + `pip install uv`, git-clone-or-curl repo, rewrite .mcp.json to the venv uvx, install the
+  feishu-bridge skill) + thin `install.sh`/`install.bat` wrappers. `run-bridge.sh`/`run-bridge.bat`
+  wrappers -> launcher up. **AC7 (D12):** `keeper()` now dispatches on platform.system() —
+  `_keeper_posix` (pty) / `_keeper_windows` (pywinPTY.open/spawn/read/write + Windows detach).
+  Skill updated: launches via run-bridge; agent-launched bridges are stopped by the agent on its
+  own exit (D11; manual launches left alone). README Installation section (curl|sh one-liner).
+- **Decisions locked (D9–D12):** install.py + sh/bat wrappers; drop lark/feishu check; git-first
+  (auto-update) else curl; detached + agent-exit-stop (skill-driven, agent-launched only); AC7.
+- **Caveat:** AC7 (_keeper_windows) is **untested** (no Windows env here) — code path present +
+  py_compile clean; needs Windows verification. run-bridge.bat therefore unverified on native Windows.
+- **PRD impact:** AC7 implemented (was pending); D9–D12 added to Appendix A.
+
+
 ### 2026-07-23 — setup skill `feishu-bridge` (agent-driven UX)
 - **Task:** enhancement (the original OQ2 'skill' ask)
 - **What:** added a skill `skills/feishu-bridge/SKILL.md` (plugin skill) AND installed a copy at `~/.claude/skills/feishu-bridge/` so it is immediately available without enabling the plugin. On 'set up/run/start/bring up/connect the feishu bridge' the agent does the WHOLE thing: preflight (python3/uv/claude), gather creds (APP_ID/SECRET, optional open_id), write .env, run `python3 -m mcp_channel.launcher up` (or `--mode auto` without an allowlist), report. Also handles 'stop/status/mode/doctor'. The user only provides credentials when asked — no manual commands. Resolves OQ2 (commands for direct control; skill for conversational setup).

@@ -84,3 +84,29 @@
   - Depends on: T1–T5
 - [x] **T6.2** Run every PRD §3 acceptance criterion; record results in log.md.
 - [x] **T6.3** `prd.md` Status → Complete; final log.md summary; commit + push `feat/bridge-onboarding`.
+
+
+## Phase 7 — Installer + run scripts + Windows (AC7) + skill/README wiring
+- [x] **T7.1** `install.py` cross-platform installer + `install.sh`/`install.bat` wrappers
+  - Files: `install.py` (new), `install.sh` (new), `install.bat` (new)
+  - What: preflight (python>=3.10, claude -> stop if missing); mkdir ~/.chat_bridge; venv;
+    `pip install uv`; clone via git (else curl tarball) into ~/.chat_bridge/<repo>; point
+    .mcp.json at the venv's uvx; install the feishu-bridge skill to ~/.claude/skills/. (D9/D10)
+  - Acceptance: `python3 install.py` (with prereqs) sets up ~/.chat_bridge + installs the skill.
+- [x] **T7.2** `run-bridge.sh` (POSIX) + `run-bridge.bat` (Windows) wrappers
+  - Files: `run-bridge.sh`, `run-bridge.bat`
+  - What: thin wrappers -> `~/.chat_bridge/venv/bin/python -m mcp_channel.launcher up`.
+  - Acceptance: run-bridge.sh launches the bridge.
+- [x] **T7.3** AC7: pywinpty keeper port (Windows PTY)
+  - Files: `mcp_channel/launcher.py`
+  - What: `keeper()` branches on platform.system(): POSIX `pty` (current) vs Windows
+    `pywinpty.PTY` (open/spawn/read/write) + Windows-style detach. (D12)
+  - Acceptance: code path present + py_compile; (Windows runtime unverifiable on this Linux env.)
+- [x] **T7.4** skill: launch via run-bridge + agent-exit stop (agent-launched only)
+  - Files: `skills/feishu-bridge/SKILL.md`
+  - What: skill runs run-bridge; instructs the agent that launched B to `stop` before it exits
+    (manual launches are left alone). (D11)
+  - Acceptance: skill text updated.
+- [x] **T7.5** README Installation section (agent-readable; curl|sh one-liner)
+  - Files: `README.md`
+  - Acceptance: README has an Installation section describing the one-command install.

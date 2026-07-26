@@ -16,6 +16,7 @@ Subcommands (CLI: `python -m mcp_channel.launcher <cmd> [...args]`):
 from __future__ import annotations
 import json
 import os
+import platform
 import select
 import shutil
 import subprocess
@@ -99,7 +100,69 @@ def _claude_argv(mode: str, session_id: str, resume: bool) -> list[str]:
 
 
 # ---------- keeper (internal, long-lived PTY supervisor) ----------
+def _keeper_windows(argv: list[str], session_id: str) -> int:
+    """Windows PTY-keeper via pywinpty (AC7). Best-effort; needs verification on Windows.
+    pywinpty's PTY.open/spawn/read/write replace POSIX pty+select; the spawned process is
+    already detached by pywinpty, so the launcher's CREATE_NEW_PROCESS_GROUP keeps the
+    keeper itself detached from the agent."""
+    import re
+    from pywinpty import PTY
+    _ensure_state()
+    env = dict(os.environ); env["FEISHU_BRIDGE"] = "1"; env["FEISHU_CHANNEL_LOG"] = LOG_PATH
+    pty_obj = PTY.open(80, 24)
+    pty_obj.spawn(subprocess.list2cmdline(argv), cwd=str(REPO), env=env)
+    try:
+        logf = open(LOG_PATH, "a", buffering=1)
+    except Exception:
+        logf = None
+    ansi = re.compile(rb"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[<>][0-9a-z]*")
+    pid = getattr(pty_obj, "pid", None)
+    if pid:
+        PID_FILE.write_text(str(pid))
+    SESSION_FILE.write_text(session_id)
+    buf = b""; dev_done = bypass_done = False
+    while True:
+        try:
+            data = pty_obj.read()
+        except Exception:
+            break
+        if data:
+            if logf:
+                try:
+                    logf.write(data.decode(errors="replace")); logf.flush()
+                except Exception:
+                    pass
+            buf += data
+            clean = ansi.sub(b"", buf)
+            if not dev_done and b"development" in clean:
+                try: pty_obj.write(b"\r")
+                except Exception: pass
+                dev_done = True
+            elif not bypass_done and (b"Yes,Iaccept" in clean or b"No,exit" in clean):
+                try: pty_obj.write(b"2\r\x1b[B\r")
+                except Exception: pass
+                bypass_done = True
+        else:
+            time.sleep(0.2)
+    try:
+        pty_obj.close()
+    except Exception:
+        pass
+    try:
+        PID_FILE.unlink()
+    except OSError:
+        pass
+    return 0
+
+
 def keeper(argv: list[str], session_id: str) -> int:
+    """PTY-keeper dispatcher: pywinpty on Windows, POSIX pty elsewhere (AC7)."""
+    if platform.system() == "Windows":
+        return _keeper_windows(argv, session_id)
+    return _keeper_posix(argv, session_id)
+
+
+def _keeper_posix(argv: list[str], session_id: str) -> int:
     """Create a PTY, spawn claude (B) in it, auto-confirm the dev-channels dialog,
     tee output to LOG_PATH, and write B's PID. POSIX only (uses `pty`). Returns when
     claude exits."""

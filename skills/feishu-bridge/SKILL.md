@@ -28,9 +28,11 @@ Repo (run all commands from here): `/mnt/c/Users/wade/Desktop/workspace/lark-fei
    FEISHU_ALLOWED_OPEN_IDS=...   # only if provided
    ```
 4. **Launch** (this takes ~2-4 min on a WSL /mnt/c disk — wait patiently for the line
-   `bridge UP (pid ...); Feishu websocket connected.`):
-   - allowlist provided: `python3 -m mcp_channel.launcher up`            (bypass, default)
-   - no allowlist:        `python3 -m mcp_channel.launcher up --mode auto`
+   `bridge UP (pid ...); Feishu websocket connected.`). Prefer the installed wrapper if present:
+   - installed (via install.sh): `~/.chat_bridge/claude-code-lark-bridge/run-bridge.sh`
+     (append `-- --mode auto` for no-allowlist; bypass is the default)
+   - or directly: `python3 -m mcp_channel.launcher up`            (bypass, default)
+                  `python3 -m mcp_channel.launcher up --mode auto`  (no allowlist)
 5. **Report**: "The bridge is UP. DM your bot on Feishu/Lark — your messages reach Claude
    here, and Claude replies (with OnIt->Done emoji) back to Feishu." Mention how to
    stop/check later. If `up` failed, run `python3 -m mcp_channel.doctor` and report its
@@ -42,6 +44,12 @@ Run the corresponding launcher command and report the output:
 - status:      `python3 -m mcp_channel.launcher status`
 - switch mode: `python3 -m mcp_channel.launcher mode plan|auto|acceptEdits|bypassPermissions`
 - diagnose:    `python3 -m mcp_channel.doctor`
+
+## Before YOU exit (only if YOU launched the bridge via this skill)
+If **you (the agent)** launched the bridge in step 4, then before you stop / the session ends,
+run `python3 -m mcp_channel.launcher stop` (or the run-bridge stop equivalent) to tear it down
+cleanly — no orphan. This applies **only** when the bridge was started by you via this skill;
+if the user launched it manually (they ran `run-bridge.sh` themselves), leave it running.
 
 ## Notes
 - The bridge (B) is a separate DETACHED session; it keeps running after this session ends.

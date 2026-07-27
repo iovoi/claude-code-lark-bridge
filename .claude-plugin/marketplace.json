@@ -1,0 +1,11 @@
+{
+  "name": "feishu-local",
+  "owner": { "name": "local" },
+  "plugins": [
+    {
+      "name": "feishu",
+      "source": ".",
+      "description": "Feishu/Lark channel for Claude Code."
+    }
+  ]
+}

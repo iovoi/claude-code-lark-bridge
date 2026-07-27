@@ -40,16 +40,52 @@ cp .env.example .env
 
 ## Run
 
-Register the channel as a Claude Code plugin (from the repo root), then launch a
-session with the channel enabled:
+Register the channel via the local **marketplace**, then launch a session with the
+channel enabled. From the repo root, inside a `claude` session:
+
+```
+/plugin marketplace add .            # registers the 'feishu-local' marketplace (.claude-plugin/marketplace.json)
+/plugin install feishu@feishu-local  # installs the feishu plugin
+```
+
+Then start Claude Code with the channel enabled (it spawns the MCP server as a
+child process and connects the Feishu websocket for the life of the session):
 
 ```bash
-claude plugin install .                 # registers the `feishu` plugin (.claude-plugin/ + .mcp.json)
-claude --channels plugin:feishu         # start Claude Code with the Feishu channel
+claude --channels plugin:feishu@feishu-local
 ```
 
 Inbound Feishu messages (from allowlisted senders) now appear in that Claude
 session as user turns; Claude replies by calling the channel's `reply` tool.
+
+## Local dev mode (`server:feishu`)
+
+The channel-plugin **allowlist** (Anthropic-maintained) currently blocks
+plugin-installed channels for organization accounts, so the working path today
+is **local dev mode**, which bypasses the allowlist:
+
+1. Make the venv python reachable by the project `.mcp.json`. For dev mode,
+   `${CLAUDE_PLUGIN_ROOT}` isn't set, so point it at your venv (one-liner):
+   ```bash
+   .venv/bin/python - <<'PY'
+   import json, pathlib
+   py = str(pathlib.Path(".venv/bin/python").resolve())
+   pathlib.Path(".mcp.json").write_text(json.dumps(
+       {"mcpServers": {"feishu": {"command": py, "args": ["-m", "mcp_channel"]}}, indent=2))
+   PY
+   ```
+   (This is a local, uncommitted override — the repo keeps the portable
+   `${CLAUDE_PLUGIN_ROOT}/...` form above.)
+2. Allow the tools (one-time, in `~/.claude/settings.json`):
+   ```json
+   "permissions": { "allow": ["mcp__feishu__reply", "mcp__feishu__react"] }
+   ```
+3. Launch (always exit the previous session first, so no orphan lingers):
+   ```bash
+   claude --dangerously-load-development-channels server:feishu
+   ```
+   Channel logs tee to `/tmp/feishu-channel.log`. Wait ~1-2 min for
+   `connected to wss://msg-frontier.feishu.cn/…`, then DM the bot.
 
 ## Access control
 
@@ -62,7 +98,7 @@ anything beyond personal testing.
 - `mcp_channel/` — the MCP channel server (capabilities, tools, websocket ingest,
   drain loop, allowlist).
 - `feishu_api.py` — Feishu REST client + send/react actions (reused by the tools).
-- `.mcp.json` + `.claude-plugin/plugin.json` — register the server as a channel.
+- `.mcp.json` + `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` — register the server as a local channel plugin (`feishu@feishu-local`).
 - `tests/stdio_smoke.py` — offline handshake smoke test.
 - `docs/mcp-bridge/` — PRD, task list, implementation log.
 

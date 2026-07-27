@@ -118,5 +118,29 @@
 
 ## Phase 4 — Verify & wrap up
 - [x] **T4.1** Run every acceptance criterion (PRD §3); record results in `log.md`.
-- [ ] **T4.2** Update `prd.md` Status → Complete; write final `log.md` summary;
+- [x] **T4.2** Update `prd.md` Status → Complete; write final `log.md` summary;
   commit on `feat/mcp-bridge`.
+
+
+## Phase 5 — Working → done emoji cycle (post-complete enhancement)
+Ports the v1 bridge's reaction bookends into the channel.
+
+- [x] **T5.1** Emoji config in `feishu_api.py`
+  - Files: `feishu_api.py`
+  - What: add `EMOJI_WORKING`/`EMOJI_DONE` from env (defaults OnIt/Done). (PRD §4.8)
+  - Acceptance: `python -c "import feishu_api; print(feishu_api.EMOJI_WORKING)"` → OnIt.
+- [x] **T5.2** Cycle helpers + wire-in in `server.py`
+  - Files: `mcp_channel/server.py`
+  - What: `_REACTIONS` bounded LRU + `_stamp_working` (called in `_push` before the
+    notification) + `_finish_working` (called in the `reply` tool when send ok).
+    (PRD §4.8)
+  - Acceptance: unit test of the map (stamp→remember→finish→done+remove+consume) passes.
+- [x] **T5.3** Document emoji keys in `.env.example`
+  - Files: `.env.example`
+  - Acceptance: `FEISHU_EMOJI_WORKING`/`FEISHU_EMOJI_DONE` present.
+- [x] **T5.4** Unit-test the cycle map logic (no real Feishu)
+  - Acceptance: stamp→remember→finish removes working + stamps done + consumes entry.
+- [x] **T5.5** Regression stdio smoke (dummy creds) still green
+  - Acceptance: `tests/stdio_smoke.py` → SMOKE OK (emoji path only runs on successful send).
+- [x] **T5.6** Update PRD/tasks/log for the enhancement
+  - Acceptance: prd AC8 + §4.8 + D6; this Phase 5; log entry.

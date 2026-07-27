@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import threading
 import time
 from contextlib import AsyncExitStack
 from typing import Any, Literal
@@ -40,6 +41,52 @@ from . import access
 from . import feishu_ingest
 
 BOOT_TIME = time.time()
+
+# --- working/done emoji cycle ---
+# chat_id -> (incoming_message_id, working_reaction_id). Bounded LRU.
+_REACTION_LOCK = threading.Lock()
+_REACTIONS: dict[str, tuple[str | None, str | None]] = {}
+_REACTIONS_MAX = 256
+
+
+def _stamp_working(chat_id, message_id) -> None:
+    """On inbound message: stamp the working emoji and remember it so the reply
+    tool can later flip it to done. Fail-soft (missing reaction_id is fine)."""
+    if not (chat_id and message_id):
+        return
+    working_rid = None
+    try:
+        working_rid = api.add_reaction(message_id, api.EMOJI_WORKING)
+    except Exception as e:
+        print(f"[react] working stamp failed: {e}", file=sys.stderr)
+    with _REACTION_LOCK:
+        if len(_REACTIONS) >= _REACTIONS_MAX:
+            _REACTIONS.pop(next(iter(_REACTIONS)))
+        _REACTIONS[chat_id] = (message_id, working_rid)
+    print(f"[react] working on {message_id} ({api.EMOJI_WORKING})", file=sys.stderr)
+
+
+def _finish_working(chat_id) -> None:
+    """On reply: stamp done on the originating message and clear the working emoji."""
+    if not chat_id:
+        return
+    with _REACTION_LOCK:
+        entry = _REACTIONS.pop(chat_id, None)
+    if not entry:
+        return
+    message_id, working_rid = entry
+    if message_id:
+        try:
+            api.add_reaction(message_id, api.EMOJI_DONE)
+            print(f"[react] done on {message_id} ({api.EMOJI_DONE})", file=sys.stderr)
+        except Exception as e:
+            print(f"[react] done stamp failed: {e}", file=sys.stderr)
+        if working_rid:
+            try:
+                api.delete_reaction(message_id, working_rid)
+            except Exception:
+                pass
+
 
 
 # --- the custom channel notification (plain BaseModel; see log T0.1 caveat #3) ---
@@ -107,6 +154,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             print(f"[tool] reply raised: {e}", file=sys.stderr)
         print(f"[tool] reply chat={chat_id} -> {'sent ' + mid if ok else 'failed'}",
               file=sys.stderr)
+        if ok:
+            _finish_working(chat_id)
         return [TextContent(type="text", text="sent" if ok else "send failed")]
     if name == "react":
         message_id = arguments.get("message_id")
@@ -147,6 +196,7 @@ async def _push(session: ServerSession, evt: dict) -> None:
         print(f"[access] denied {mid} user={evt.get('open_id')}", file=sys.stderr)
         return
     notification = _build_notification(evt)
+    _stamp_working(evt.get("chat_id"), mid)
     await session.send_notification(notification)
     print(f"[push] {mid} chat={evt.get('chat_id')} content={notification.params.content[:60]!r}",
           file=sys.stderr)

@@ -51,8 +51,14 @@ def load_env(path: Path = None) -> None:
 load_env()
 
 # --- config (read after load_env) ---
-APP_ID = os.environ.get("FEISHU_APP_ID", "")
-APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
+def cred(key: str) -> str:
+    """Resolve a config value: CLAUDE_PLUGIN_OPTION_<key> (plugin userConfig path) first,
+    then the classic <key> (env / .env dev path). Empty string if neither."""
+    return os.environ.get(f"CLAUDE_PLUGIN_OPTION_{key}") or os.environ.get(key, "")
+
+
+APP_ID = cred("FEISHU_APP_ID")
+APP_SECRET = cred("FEISHU_APP_SECRET")
 CONVERSATION_DIR = Path(
     os.environ.get("FEISHU_CONVERSATION_DIR", str(PROJECT_DIR / "conversation"))
 )

@@ -1,6 +1,27 @@
 {
   "name": "feishu",
-  "description": "Feishu/Lark channel for Claude Code — pushes inbound Feishu messages into a running Claude session and exposes reply/react tools. Configure allowlist via FEISHU_ALLOWED_OPEN_IDS / FEISHU_ALLOWED_CHAT_IDS in .env.",
-  "version": "0.1.0",
-  "keywords": ["feishu", "lark", "messaging", "channel", "mcp"]
+  "description": "Feishu/Lark channel for Claude Code — pushes inbound Feishu messages into a running Claude session and exposes reply/react tools. Configure creds/allowlist via the prompted values (or .env in dev mode).",
+  "version": "0.2.0",
+  "keywords": ["feishu", "lark", "messaging", "channel", "mcp"],
+  "userConfig": {
+    "FEISHU_APP_ID": {
+      "type": "string",
+      "description": "Feishu/Lark Custom App ID (from the Developer Console > Credentials; starts with cli_).",
+      "required": true
+    },
+    "FEISHU_APP_SECRET": {
+      "type": "string",
+      "description": "Feishu/Lark Custom App Secret (from the Developer Console > Credentials).",
+      "sensitive": true,
+      "required": true
+    },
+    "FEISHU_ALLOWED_OPEN_IDS": {
+      "type": "string",
+      "description": "Comma-separated allowed sender open_ids (recommended; the bot's trust boundary)."
+    },
+    "FEISHU_ALLOWED_CHAT_IDS": {
+      "type": "string",
+      "description": "Comma-separated allowed chat_ids."
+    }
+  }
 }

@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 conversation/
+dist/
+.env-backup
+.env.*

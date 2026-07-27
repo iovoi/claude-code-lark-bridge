@@ -7,10 +7,15 @@ also auto-confirms claude's dev-channels dialog (fixed-cadence Enter — see T0.
 tees output to the log.
 
 Subcommands (CLI: `python -m mcp_channel.launcher <cmd> [...args]`):
-  up [--mode MODE]   launch B (doctor --no-ws first; bypass requires an allowlist)
-  status             is B up? + last log lines
-  stop               stop B + reap orphans
-  mode MODE          respawn B with --resume <session-id> --permission-mode MODE
+  up [--mode MODE]   launch B (default mode `auto`; `--mode bypassPermissions` requires
+                     an allowlist). Refuses if a bridge is already running (discovered
+                     via /proc, not just the pid file).
+  status             is B up? (via /proc discovery) + last log lines
+  stop               stop B by discovering real bridge pids, SIGTERM (grace) then SIGKILL,
+                     and reap leftover keepers. Idempotent.
+  mode MODE          respawn B with --resume <session-id> --permission-mode MODE; waits
+                     for the old bridge to fully exit first so the resumed session does
+                     not collide with a still-living one.
   keeper ...         (internal) the long-lived PTY supervisor, spawned detached by `up`
 """
 from __future__ import annotations
@@ -31,7 +36,10 @@ PID_FILE = STATE_DIR / "bridge.pid"
 SESSION_FILE = STATE_DIR / "bridge.session"
 LOG_PATH = os.environ.get("FEISHU_CHANNEL_LOG", "/tmp/feishu-channel.log")
 CLAUDE = shutil.which("claude") or "claude"
-DEFAULT_MODE = "bypassPermissions"
+# Default permission mode for `up` (no --mode) and `mode` (no arg). `auto` lands the
+# bridge in a sane, least-surprise mode without the allowlist requirement that
+# `bypassPermissions` imposes. Bypass is still opt-in via `--mode bypassPermissions`.
+DEFAULT_MODE = "auto"
 VALID_MODES = {"plan", "auto", "acceptEdits", "bypassPermissions", "default"}
 
 
@@ -55,6 +63,59 @@ def _alive(pid: int | None) -> bool:
         return True
     except OSError:
         return False
+
+
+def _proc_cmdline(pid: int, proc_root: str = "/proc") -> list[str]:
+    """Read /proc/<pid>/cmdline as a list of argv tokens. [] on any error."""
+    try:
+        raw = Path(proc_root, str(pid), "cmdline").read_bytes()
+    except OSError:
+        return []
+    return [t for t in raw.decode(errors="replace").split("\x00") if t]
+
+
+def _pids_matching(needle_tokens: set[str], proc_root: str = "/proc") -> list[int]:
+    """Return pids (sorted) whose /proc/<pid>/cmdline contains ALL needle_tokens.
+    POSIX-only: returns [] if proc_root is not a directory. Excludes our own pid.
+    Does NOT rely on bridge.pid, so it survives a stale/missing pid file."""
+    root = Path(proc_root)
+    if not root.is_dir():
+        return []
+    me = os.getpid()
+    out: list[int] = []
+    for name in os.listdir(root):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid == me:
+            continue
+        parts = _proc_cmdline(pid, proc_root)
+        if parts and needle_tokens.issubset(set(parts)):
+            out.append(pid)
+    return sorted(out)
+
+
+# Tokens that uniquely identify a bridge claude process (see _claude_argv):
+#   claude --dangerously-load-development-channels server:feishu ...
+_BRIDGE_TOKENS = {"--dangerously-load-development-channels", "server:feishu"}
+_KEEPER_TOKENS = {"mcp_channel.launcher", "keeper"}
+
+
+def _bridge_pids(proc_root: str = "/proc") -> list[int]:
+    """Discover live bridge-claude pids (POSIX, via /proc). Independent of bridge.pid
+    so orphaned/hard-killed-keeper cases are still found. [] on Windows (no /proc)."""
+    if platform.system() == "Windows":
+        return []
+    return _pids_matching(_BRIDGE_TOKENS, proc_root)
+
+
+def _keeper_pids(proc_root: str = "/proc") -> list[int]:
+    """Discover live launcher-keeper pids (POSIX). The keeper argv is
+    `python -m mcp_channel.launcher keeper <mode> <session_id>` (note: it does NOT
+    carry the dev-channels tokens, so _bridge_pids won't catch it)."""
+    if platform.system() == "Windows":
+        return []
+    return _pids_matching(_KEEPER_TOKENS, proc_root)
 
 
 def _allowlist_set() -> bool:
@@ -226,7 +287,11 @@ def _keeper_posix(argv: list[str], session_id: str) -> int:
 # ---------- public subcommands ----------
 def up(mode: str = DEFAULT_MODE) -> int:
     _ensure_state()
-    if _alive(_read_pid()):
+    pids = _bridge_pids()
+    if pids:
+        print(f"[up] bridge already running (pids {pids})"); return 0
+    # POSIX discovery is empty on Windows; fall back to the pid file there.
+    if platform.system() == "Windows" and _alive(_read_pid()):
         print(f"[up] bridge already running (pid {_read_pid()})"); return 0
     if mode not in VALID_MODES:
         print(f"[up] unknown mode {mode!r}; one of {sorted(VALID_MODES)}"); return 2
@@ -250,15 +315,15 @@ def up(mode: str = DEFAULT_MODE) -> int:
                      cwd=str(REPO), env=dict(os.environ),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
-    # wait for the keeper to write the PID + the ws to connect
+    # wait for the keeper to spawn claude + the ws to connect
     deadline = time.time() + 240
     while time.time() < deadline:
-        if _alive(_read_pid()) and "connected to wss" in _log_tail(2000):
-            print(f"[up] bridge UP (pid {_read_pid()}); Feishu websocket connected.")
+        if _bridge_pids() and "connected to wss" in _log_tail(2000):
+            print(f"[up] bridge UP (pids {_bridge_pids()}); Feishu websocket connected.")
             return 0
         time.sleep(3)
-    if _alive(_read_pid()):
-        print(f"[up] bridge running (pid {_read_pid()}) but ws not connected yet — see {LOG_PATH}.")
+    if _bridge_pids():
+        print(f"[up] bridge running (pids {_bridge_pids()}) but ws not connected yet — see {LOG_PATH}.")
         return 0
     print(f"[up] bridge did not start — see {LOG_PATH}.")
     return 1
@@ -273,40 +338,72 @@ def _log_tail(n: int = 800) -> str:
 
 
 def status() -> int:
+    pids = _bridge_pids()
     pid = _read_pid()
-    if _alive(pid):
+    up_by_discovery = bool(pids)
+    up_by_pidfile = (platform.system() == "Windows") and _alive(pid)  # Windows has no /proc
+    if up_by_discovery:
+        print(f"[status] UP (pids {pids})")
+    elif up_by_pidfile:
         print(f"[status] UP (pid {pid})")
     else:
         print("[status] DOWN")
     tail = [l for l in _log_tail(1200).splitlines() if l.strip()][-6:]
     for l in tail:
         print("   " + l)
-    return 0 if _alive(pid) else 1
+    return 0 if (up_by_discovery or up_by_pidfile) else 1
 
 
-def stop() -> int:
-    pid = _read_pid()
-    if not _alive(pid):
-        print("[stop] not running")
-    else:
-        print(f"[stop] stopping pid {pid} …")
+def _term_then_kill(pids: list[int], grace_terms: int = 14, grace_kill: int = 4) -> None:
+    """SIGTERM each pid, wait up to ~grace_terms*0.5s for them to exit (graceful exit
+    lets claude release its session lock and flush), then SIGKILL stragglers.
+    Per-pid OSErrors (already dead, permission) are swallowed."""
+    for pid in pids:
         try:
             os.kill(pid, 15)  # SIGTERM
         except OSError:
             pass
-        for _ in range(10):
-            if not _alive(pid):
-                break
-            time.sleep(0.5)
+    for _ in range(grace_terms):
+        if not any(_alive(p) for p in pids):
+            break
+        time.sleep(0.5)
+    for pid in pids:
         if _alive(pid):
             try:
                 os.kill(pid, 9)  # SIGKILL
             except OSError:
                 pass
+    for _ in range(grace_kill):
+        if not any(_alive(p) for p in pids):
+            break
+        time.sleep(0.5)
+
+
+def stop() -> int:
+    pids = _bridge_pids()
+    # Windows has no /proc discovery; fall back to the pid file written by the keeper.
+    if not pids and platform.system() == "Windows":
+        fpid = _read_pid()
+        if _alive(fpid):
+            pids = [fpid]
+    keepers = _keeper_pids()
+    if not pids and not keepers:
+        print("[stop] not running")
+    else:
+        if pids:
+            print(f"[stop] stopping bridge pids {pids} …")
+            _term_then_kill(pids)
+        # Keepers normally exit on their own once their claude child dies; reap any that
+        # linger (e.g. keeper whose claude was orphaned under a different pid).
+        keepers = [k for k in _keeper_pids() if _alive(k)]
+        if keepers:
+            print(f"[stop] reaping keeper pids {keepers} …")
+            _term_then_kill(keepers, grace_terms=2, grace_kill=2)
     try:
         PID_FILE.unlink()
     except OSError:
         pass
+    # NOTE: bridge.session is intentionally preserved — `mode` needs it for --resume.
     print("[stop] done")
     return 0
 
@@ -322,7 +419,19 @@ def mode(new_mode: str) -> int:
     session_id = SESSION_FILE.read_text().strip()
     print(f"[mode] restarting bridge in {new_mode} (resuming session {session_id}) …")
     stop()
-    time.sleep(1)
+    # Wait gate: do NOT --resume until the old bridge is actually gone, otherwise
+    # claude refuses with "Session ID ... is already in use" and the bridge wedges.
+    # The graceful SIGTERM inside stop() lets claude release its session lock first.
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if not _bridge_pids() and not _keeper_pids():
+            break
+        time.sleep(0.5)
+    remaining = _bridge_pids()
+    if remaining:
+        print(f"[mode] could not stop existing bridge (pids {remaining}); "
+              f"aborting to avoid session-lock collision. See {LOG_PATH}.")
+        return 1
     argv = _claude_argv(new_mode, session_id, resume=True)
     subprocess.Popen([sys.executable, "-m", "mcp_channel.launcher", "keeper", new_mode, session_id],
                      cwd=str(REPO), env=dict(os.environ),
@@ -330,10 +439,10 @@ def mode(new_mode: str) -> int:
                      start_new_session=True)
     deadline = time.time() + 240
     while time.time() < deadline:
-        if _alive(_read_pid()) and "connected to wss" in _log_tail(2000):
-            print(f"[mode] bridge UP in {new_mode} (pid {_read_pid()})."); return 0
+        if _bridge_pids() and "connected to wss" in _log_tail(2000):
+            print(f"[mode] bridge UP in {new_mode} (pids {_bridge_pids()})."); return 0
         time.sleep(3)
-    print(f"[mode] bridge relaunched (pid {_read_pid()}); see {LOG_PATH}.")
+    print(f"[mode] bridge relaunched; see {LOG_PATH}.")
     return 0
 
 

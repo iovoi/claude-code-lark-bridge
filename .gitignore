@@ -6,3 +6,6 @@ conversation/
 dist/
 .env-backup
 .env.*
+
+# test fixture (created at runtime by tests/test_launcher_discover.py)
+tests/_proc_fixture/

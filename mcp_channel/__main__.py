@@ -1,12 +1,17 @@
 """Entry point for the Feishu MCP channel.
 
 `run()` is the console entry point (`feishu-channel`) and the `python -m mcp_channel`
-target. It tees sys.stderr to a file (default /tmp/feishu-channel.log, override via
-FEISHU_CHANNEL_LOG) so the channel's [boot]/[ws]/[access]/[push] logs are inspectable
-even when launched as a child process whose stderr is captured by the host (which may
-only surface the first line)."""
+target. It tees sys.stderr to a file (default <tempdir>/feishu-channel.log, override
+via FEISHU_CHANNEL_LOG) so the channel's [boot]/[ws]/[access]/[push] logs are
+inspectable even when launched as a child process whose stderr is captured by the host
+(which may only surface the first line)."""
 import os
 import sys
+import tempfile
+
+# Cross-platform default log location (must match mcp_channel/launcher.py). The keeper
+# sets FEISHU_CHANNEL_LOG in the spawned claude's env so this matches the PTY log.
+DEFAULT_LOG_PATH = os.path.join(tempfile.gettempdir(), "feishu-channel.log")
 
 
 class _Tee:
@@ -56,7 +61,7 @@ def run() -> None:
     """Console entry point + `python -m mcp_channel` target."""
     _enable_parent_death_signal()
     real = sys.stderr
-    log_path = os.environ.get("FEISHU_CHANNEL_LOG", "/tmp/feishu-channel.log")
+    log_path = os.environ.get("FEISHU_CHANNEL_LOG", DEFAULT_LOG_PATH)
     try:
         sys.stderr = _Tee(real, open(log_path, "a", buffering=1))
     except Exception as e:  # pragma: no cover

@@ -13,6 +13,7 @@ The run skill is installed to ~/.claude/skills/feishu-bridge/.
 from __future__ import annotations
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -50,9 +51,77 @@ def _die(msg: str) -> "NoReturn":  # noqa: F821
     print(f"[install] ERROR: {msg}", file=sys.stderr); sys.exit(1)
 
 
+def _py_ok(exe: str) -> bool:
+    """True if `exe` is a Python >=3.10 we can run."""
+    try:
+        v = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False)
+    except OSError:
+        return False
+    m = re.search(r"(\d+)\.(\d+)", (v.stdout or "") + (v.stderr or ""))
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (3, 10)
+
+
+def _find_python_ge310() -> str | None:
+    """Locate a Python >=3.10 already on the system: py launcher -0p list, then
+    python3.1x / python3 / python on PATH. Returns absolute path or None."""
+    cands: list[str] = []
+    py = _bin("py")  # Windows Python launcher
+    if py:
+        try:
+            lst = subprocess.run([py, "-0p"], capture_output=True, text=True, check=False).stdout
+            for line in lst.splitlines():
+                m = re.search(r"([A-Za-z]:\\[^\s]+|/\S+)", line)
+                if m:
+                    cands.append(m.group(1))
+        except OSError:
+            pass
+    for name in ("python3.12", "python3.11", "python3.10", "python3", "python"):
+        p = _bin(name)
+        if p:
+            cands.append(p)
+    for c in cands:
+        if _py_ok(c):
+            return c
+    return None
+
+
+def _bootstrap_python() -> str | None:
+    """Best-effort install of a Python >=3.10 on a clean machine. Windows: winget.
+    Anywhere uv is present: `uv python install`. Returns the interpreter path or None."""
+    if os.name == "nt" and _bin("winget"):
+        _step("Python <3.10: bootstrapping Python 3.12 via winget …")
+        subprocess.run(["winget", "install", "--id", "Python.Python.3.12", "-e", "--silent",
+                        "--accept-package-agreements", "--accept-source-agreements"], check=False)
+        exe = _find_python_ge310()
+        if exe:
+            return exe
+        known = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python" / "Python312" / "python.exe"
+        if known.is_file() and _py_ok(str(known)):
+            return str(known)
+    if _bin("uv"):
+        _step("Python <3.10: bootstrapping Python 3.12 via uv …")
+        subprocess.run(["uv", "python", "install", "3.12"], check=False)
+        try:
+            out = subprocess.run(["uv", "python", "find", "3.12"],
+                                 capture_output=True, text=True, check=False).stdout.strip()
+            if out and _py_ok(out):
+                return out
+        except OSError:
+            pass
+    return None
+
+
 def preflight() -> None:
     if sys.version_info < (3, 10):
-        _die(f"Python >=3.10 required (have {platform.python_version()}). Install python3 and re-run.")
+        _step(f"this Python is {platform.python_version()} (<3.10); looking for a newer one …")
+        exe = _find_python_ge310() or _bootstrap_python()
+        if not exe:
+            _die("Python >=3.10 required. None found and auto-install failed. "
+                 "Install Python 3.10+ (winget install --id Python.Python.3.12, or "
+                 "https://python.org) and re-run.")
+        _step(f"re-launching installer under {exe}")
+        # Re-exec this script under the suitable interpreter (preserves argv).
+        os.execv(exe, [exe, str(Path(__file__).resolve())] + sys.argv[1:])
     if not _bin("claude"):
         _die("Claude Code (`claude`) not found on PATH. Install it (https://docs.anthropic.com/claude-code) and re-run.")
     _step(f"python {platform.python_version()} OK; claude found.")
@@ -66,6 +135,17 @@ def make_venv() -> None:
     pip = _venv_bin("pip")
     _step("ensuring uv is installed in the venv …")
     subprocess.run([pip, "install", "-q", "-U", "uv"], check=True)
+    # The launcher/doctor/keeper (run-bridge.* → python -m mcp_channel.launcher) import
+    # feishu_api (→ lark-oapi), mcp, and (Windows) pywinpty FROM THIS VENV. The MCP server
+    # context (A) gets its deps via uvx at runtime, but the management CLI context (B)
+    # does not — so install the package + platform extra into the venv too.
+    extra = "[windows]" if os.name == "nt" else ""
+    _step(f"installing bridge package + deps into venv{(' (extra: windows)' if extra else '')} …")
+    target = f"{REPO}{extra}"
+    rc = subprocess.run([pip, "install", "-q", "-e", target], check=False).returncode
+    if rc != 0:
+        # editable may fail on some setups; fall back to a plain install of the path
+        subprocess.run([pip, "install", "-q", target], check=True)
     _step(f"venv ready; uvx at {_venv_bin('uvx')}")
 
 
@@ -92,32 +172,39 @@ def fetch_repo() -> None:
 
 
 def configure_mcp() -> None:
-    """Rewrite .mcp.json to use the venv's uvx (absolute, OS-correct) + the local repo."""
+    """Rewrite .mcp.json to use the venv's uvx (absolute, OS-correct) + the local repo.
+    On Windows, add --extra windows so the uvx-fetched env includes pywinpty."""
     import json
     uvx = _venv_bin("uvx")
-    mcp = {
-        "mcpServers": {
-            "feishu": {"command": uvx, "args": ["--from", str(REPO), "feishu-channel"]}
-        }
-    }
+    args = ["--from", str(REPO)]
+    if os.name == "nt":
+        args += ["--extra", "windows"]
+    args += ["feishu-channel"]
+    mcp = {"mcpServers": {"feishu": {"command": uvx, "args": args}}}
     (REPO / ".mcp.json").write_text(json.dumps(mcp, indent=2), encoding="utf-8")
-    _step(f".mcp.json -> venv uvx ({uvx}) + repo ({REPO})")
+    _step(f".mcp.json -> venv uvx ({uvx}) + repo ({REPO})" +
+          (" (+windows)" if os.name == "nt" else ""))
 
 
 def install_skill() -> None:
     src = REPO / SKILL_SRC
     if not src.is_file():
         _step(f"skill source not found at {src} (skipping)"); return
+    text = src.read_text(encoding="utf-8")
+    # The source skill carries {{REPO}}/{{PY}} placeholders so it is not pinned to a
+    # developer's machine; substitute the concrete install path + venv interpreter here.
+    text = text.replace("{{REPO}}", str(REPO))
+    text = text.replace("{{PY}}", _venv_bin("python"))
     SKILL_DST.parent.mkdir(parents=True, exist_ok=True)
-    SKILL_DST.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    SKILL_DST.write_text(text, encoding="utf-8")
     _step(f"installed run skill -> {SKILL_DST}")
 
 
 def main() -> None:
     _step(f"installing bridge into {CHAT_BRIDGE} (ref={REPO_REF})")
     preflight()
+    fetch_repo()        # fetch before make_venv: the venv installs the repo package
     make_venv()
-    fetch_repo()
     configure_mcp()
     install_skill()
     rb = "run-bridge.sh" if os.name != "nt" else "run-bridge.bat"

@@ -26,6 +26,7 @@ import select
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -34,7 +35,11 @@ REPO = Path(__file__).resolve().parent.parent
 STATE_DIR = Path(os.environ.get("FEISHU_BRIDGE_STATE", str(Path.home() / ".feishu-bridge")))
 PID_FILE = STATE_DIR / "bridge.pid"
 SESSION_FILE = STATE_DIR / "bridge.session"
-LOG_PATH = os.environ.get("FEISHU_CHANNEL_LOG", "/tmp/feishu-channel.log")
+# Cross-platform default log location. /tmp does not exist on native Windows
+# (it resolves to C:\tmp\…, which usually can't be created), so fall back to the
+# OS temp dir. Override with FEISHU_CHANNEL_LOG. Must match mcp_channel/__main__.py.
+DEFAULT_LOG_PATH = os.path.join(tempfile.gettempdir(), "feishu-channel.log")
+LOG_PATH = os.environ.get("FEISHU_CHANNEL_LOG", DEFAULT_LOG_PATH)
 CLAUDE = shutil.which("claude") or "claude"
 # Default permission mode for `up` (no --mode) and `mode` (no arg). `auto` lands the
 # bridge in a sane, least-surprise mode without the allowlist requirement that
@@ -56,13 +61,67 @@ def _read_pid() -> int | None:
 
 
 def _alive(pid: int | None) -> bool:
+    """Is `pid` a running process? Cross-platform.
+
+    POSIX: os.kill(pid, 0) is the standard liveness probe. On Windows that maps
+    signal 0 to CTRL_C_EVENT and is NOT a liveness probe, so use the Win32 API
+    (OpenProcess + GetExitCodeProcess == STILL_ACTIVE) there instead."""
     if not pid:
         return False
+    if os.name == "nt":
+        return _alive_windows(pid)
     try:
         os.kill(pid, 0)
         return True
     except OSError:
         return False
+
+
+def _alive_windows(pid: int) -> bool:
+    """Win32 liveness check via GetExitCodeProcess. False on any error (handles
+    closed, insufficient rights, or already-exited process)."""
+    import ctypes
+    from ctypes import wintypes
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    try:
+        k = ctypes.windll.kernel32
+        k.OpenProcess.restype = wintypes.HANDLE
+        k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        k.CloseHandle.argtypes = [wintypes.HANDLE]
+        h = k.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not k.GetExitCodeProcess(h, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            k.CloseHandle(h)
+    except Exception:
+        return False
+
+
+def _kill_pid(pid: int | None, force: bool = True) -> None:
+    """Terminate a process. POSIX: SIGKILL (force) or SIGTERM. Windows: taskkill
+    /T [/F] (kills the whole process tree). Per-pid failures are swallowed."""
+    if not pid:
+        return
+    if os.name == "nt":
+        cmd = ["taskkill", "/PID", str(pid), "/T"]
+        if force:
+            cmd.append("/F")
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        except OSError:
+            pass
+        return
+    try:
+        os.kill(pid, 9 if force else 15)
+    except OSError:
+        pass
 
 
 def _proc_cmdline(pid: int, proc_root: str = "/proc") -> list[str]:
@@ -75,24 +134,53 @@ def _proc_cmdline(pid: int, proc_root: str = "/proc") -> list[str]:
 
 
 def _pids_matching(needle_tokens: set[str], proc_root: str = "/proc") -> list[int]:
-    """Return pids (sorted) whose /proc/<pid>/cmdline contains ALL needle_tokens.
-    POSIX-only: returns [] if proc_root is not a directory. Excludes our own pid.
-    Does NOT rely on bridge.pid, so it survives a stale/missing pid file."""
+    """Return pids (sorted) whose command line contains ALL needle_tokens.
+    POSIX: scans /proc/<pid>/cmdline. Windows: queries Win32_Process via PowerShell
+    (no /proc). Excludes our own pid. Does NOT rely on bridge.pid, so it survives a
+    stale/missing pid file. Returns [] if neither source is available."""
     root = Path(proc_root)
-    if not root.is_dir():
+    if root.is_dir():
+        me = os.getpid()
+        out: list[int] = []
+        for name in os.listdir(root):
+            if not name.isdigit():
+                continue
+            pid = int(name)
+            if pid == me:
+                continue
+            parts = _proc_cmdline(pid, proc_root)
+            if parts and needle_tokens.issubset(set(parts)):
+                out.append(pid)
+        return sorted(out)
+    if os.name == "nt":
+        return _pids_matching_windows(needle_tokens)
+    return []
+
+
+def _pids_matching_windows(needle_tokens: set[str]) -> list[int]:
+    """Discover pids whose command line contains all needle_tokens on Windows, via
+    PowerShell Get-CimInstance (no /proc available). Best-effort: returns [] on any
+    failure (PowerShell missing, timeout, parse error)."""
+    try:
+        ps_cmd = ("Get-CimInstance Win32_Process | "
+                  "ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }")
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=20, check=False)
+    except Exception:
         return []
-    me = os.getpid()
-    out: list[int] = []
-    for name in os.listdir(root):
-        if not name.isdigit():
+    res: list[int] = []
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if "|" not in line:
             continue
-        pid = int(name)
-        if pid == me:
+        pid_s, _, cmdline = line.partition("|")
+        if not pid_s.isdigit():
             continue
-        parts = _proc_cmdline(pid, proc_root)
-        if parts and needle_tokens.issubset(set(parts)):
-            out.append(pid)
-    return sorted(out)
+        # Tokenise by whitespace (robust to quoting) and require all needles present.
+        if needle_tokens.issubset(set(cmdline.split())):
+            res.append(int(pid_s))
+    return sorted(res)
 
 
 # Tokens that uniquely identify a bridge claude process (see _claude_argv):
@@ -102,19 +190,15 @@ _KEEPER_TOKENS = {"mcp_channel.launcher", "keeper"}
 
 
 def _bridge_pids(proc_root: str = "/proc") -> list[int]:
-    """Discover live bridge-claude pids (POSIX, via /proc). Independent of bridge.pid
-    so orphaned/hard-killed-keeper cases are still found. [] on Windows (no /proc)."""
-    if platform.system() == "Windows":
-        return []
+    """Discover live bridge-claude pids. POSIX via /proc; Windows via CIM.
+    Independent of bridge.pid, so orphaned/hard-killed-keeper cases are still found."""
     return _pids_matching(_BRIDGE_TOKENS, proc_root)
 
 
 def _keeper_pids(proc_root: str = "/proc") -> list[int]:
-    """Discover live launcher-keeper pids (POSIX). The keeper argv is
+    """Discover live launcher-keeper pids. The keeper argv is
     `python -m mcp_channel.launcher keeper <mode> <session_id>` (note: it does NOT
     carry the dev-channels tokens, so _bridge_pids won't catch it)."""
-    if platform.system() == "Windows":
-        return []
     return _pids_matching(_KEEPER_TOKENS, proc_root)
 
 
@@ -355,9 +439,20 @@ def status() -> int:
 
 
 def _term_then_kill(pids: list[int], grace_terms: int = 14, grace_kill: int = 4) -> None:
-    """SIGTERM each pid, wait up to ~grace_terms*0.5s for them to exit (graceful exit
-    lets claude release its session lock and flush), then SIGKILL stragglers.
-    Per-pid OSErrors (already dead, permission) are swallowed."""
+    """Stop each pid. POSIX: SIGTERM, wait for graceful exit (lets claude release its
+    session lock and flush), then SIGKILL stragglers. Windows: no graceful signal
+    semantics, so taskkill /T /F the whole tree immediately. Per-pid errors swallowed."""
+    if not pids:
+        return
+    if os.name == "nt":
+        for pid in pids:
+            _kill_pid(pid, force=True)
+        # brief wait so callers reading _alive() right after see them gone
+        for _ in range(grace_kill):
+            if not any(_alive(p) for p in pids):
+                break
+            time.sleep(0.5)
+        return
     for pid in pids:
         try:
             os.kill(pid, 15)  # SIGTERM

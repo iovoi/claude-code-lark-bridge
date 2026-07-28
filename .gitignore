@@ -9,3 +9,6 @@ dist/
 
 # test fixture (created at runtime by tests/test_launcher_discover.py)
 tests/_proc_fixture/
+
+# test fixture (created at runtime by tests/test_launcher_session.py)
+tests/_session_fixture/

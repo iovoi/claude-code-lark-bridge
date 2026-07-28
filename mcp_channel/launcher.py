@@ -228,6 +228,16 @@ def _ensure_bypass_accepted() -> None:
         print("[up] set skipDangerousModePermissionPrompt=true in ~/.claude/settings.json")
 
 
+def _new_session_id() -> str:
+    """A fresh uuid4 for a new bridge session. Always fresh - never reuses the id
+    persisted in bridge.session: `up` starts a brand-new pinned session via
+    --session-id (NOT --resume), so an old id gives no conversation continuity and
+    can collide with a live session, making claude refuse with
+    "Session ID ... is already in use". bridge.session is still written (by `up`
+    and the keeper) so `mode` can --resume the running bridge."""
+    return str(uuid.uuid4())
+
+
 def _claude_argv(mode: str, session_id: str, resume: bool) -> list[str]:
     """Dev-mode argv. Bypass uses --dangerously-skip-permissions (the CLI opt-in that
     SKIPS the interactive bypass-accept dialog); other modes use --permission-mode.
@@ -390,8 +400,11 @@ def up(mode: str = DEFAULT_MODE) -> int:
     if run_doctor(include_ws=False) != 0:
         print("[up] doctor failed (creds); not launching."); return 1
 
-    session_id = (SESSION_FILE.read_text().strip()
-                  if SESSION_FILE.is_file() else str(uuid.uuid4()))
+    session_id = _new_session_id()
+    # Write the fresh id ourselves so bridge.session is authoritative even before
+    # the keeper writes it, and so `mode` later --resumes the session actually
+    # running. We deliberately do NOT reuse a persisted id (see _new_session_id).
+    SESSION_FILE.write_text(session_id)
     argv = _claude_argv(mode, session_id, resume=False)
     print(f"[up] launching bridge (mode={mode}, session={session_id}); PTY keeper detaching…")
     # spawn keeper detached (survives this process)
@@ -405,6 +418,9 @@ def up(mode: str = DEFAULT_MODE) -> int:
         if _bridge_pids() and "connected to wss" in _log_tail(2000):
             print(f"[up] bridge UP (pids {_bridge_pids()}); Feishu websocket connected.")
             return 0
+        if "already in use" in _log_tail(2000):
+            print(f"[up] session id already in use - claude refused to start. See {LOG_PATH}.")
+            return 1
         time.sleep(3)
     if _bridge_pids():
         print(f"[up] bridge running (pids {_bridge_pids()}) but ws not connected yet — see {LOG_PATH}.")

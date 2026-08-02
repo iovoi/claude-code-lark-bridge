@@ -9,11 +9,23 @@ Usage:
 """
 from __future__ import annotations
 import logging
+import sys
 import threading
 
 
+# Line-buffer stdout so PASS/FAIL/WARN lines appear immediately even when stdout
+# is a pipe (not a TTY). Without this, `python -m mcp_channel.doctor | tee` (or a
+# wrapper capturing output) sees nothing for the whole run — it looks hung. The
+# websocket probe in check_ws() can also block for its full timeout; flushing each
+# line means the creds/allowlist results show before that wait.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
+
 def _line(mark: str, name: str, detail: str) -> None:
-    print(f"[{mark}] {name}: {detail}")
+    print(f"[{mark}] {name}: {detail}", flush=True)
 
 
 def check_creds() -> tuple[bool, str]:
@@ -100,7 +112,7 @@ def run_doctor(include_ws: bool = True) -> int:
         _line("PASS" if ok else "FAIL", "websocket", hint or "connected to wss://msg-frontier.feishu.cn")
         fails += 0 if ok else 1
 
-    print("\nRESULT:", "ok" if fails == 0 else f"{fails} check(s) failed")
+    print("\nRESULT:", "ok" if fails == 0 else f"{fails} check(s) failed", flush=True)
     return 0 if fails == 0 else 1
 
 

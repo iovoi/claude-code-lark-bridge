@@ -57,9 +57,32 @@ def _enable_parent_death_signal() -> None:
         pass
 
 
+def _harden_windows_stdio() -> None:
+    """Windows stdio hardening. Python's default Windows console/pipe encoding is
+    cp1252; the MCP stdio transport re-wraps stdin/stdout buffers as UTF-8 itself,
+    but anything ELSE we print can mojibake or, under some pipe configs, wedge a
+    flush. Force the process to UTF-8 so all three streams agree. NOTE: this does
+    NOT switch the asyncio loop policy — ProactorEventLoop (the default) is what
+    the pipe-based stdio transport needs on Windows; SelectorEventLoop there only
+    handles sockets and would break stdio. The Windows stdio handshake hang is
+    still under investigation (cannot be reproduced on WSL); see server.py for the
+    handshake-stage diagnostics added to localize it."""
+    if os.name != "nt":
+        return
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
 def run() -> None:
     """Console entry point + `python -m mcp_channel` target."""
     _enable_parent_death_signal()
+    _harden_windows_stdio()
     real = sys.stderr
     log_path = os.environ.get("FEISHU_CHANNEL_LOG", DEFAULT_LOG_PATH)
     try:

@@ -159,14 +159,18 @@ def clear_keystrokes() -> None:
 # keeper cannot send Feishu messages directly. Instead it queues them here and
 # the MCP server (which has lark) drains + sends them. This is the reverse of
 # the keystroke queue (server->keeper): here keeper->server.
-def push_outbox(chat_id: str, text: str) -> None:
-    """Queue a Feishu message for the server to send (progress/stuck alerts)."""
+def push_outbox(chat_id: str, text: str, kind: str = "progress") -> None:
+    """Queue a Feishu message for the server to send (progress/stuck alerts).
+
+    `kind` ("progress" or "stuck") tags how the server should deliver it: a
+    `progress` (working-status digest) updates the previous digest in place when
+    possible; a `stuck` alert is always a fresh message."""
     _ensure_dir()
     cur = feishu_api.read_json(OUTBOX_FILE, default=[])
     if not isinstance(cur, list):
         cur = []
     seq = max([int(k.get("seq", 0)) for k in cur if isinstance(k, dict)] + [0]) + 1
-    cur.append({"seq": seq, "chat_id": chat_id, "text": text})
+    cur.append({"seq": seq, "chat_id": chat_id, "text": text, "kind": kind})
     feishu_api.atomic_write_json(OUTBOX_FILE, cur)
 
 

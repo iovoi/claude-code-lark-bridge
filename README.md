@@ -56,8 +56,9 @@ curl -fsSL https://raw.githubusercontent.com/iovoi/claude-code-lark-bridge/main/
 irm https://raw.githubusercontent.com/iovoi/claude-code-lark-bridge/main/install.py | python
 # or, after cloning:  .\install.ps1      (or:  install.bat)
 ```
-> Native-Windows bring-up uses the pywinpty PTY path (code-complete, verify on Windows);
-> **WSL2** (run `install.sh` inside Ubuntu) is the fully-verified Windows path today.
+> **Native Windows** is supported via the pywinpty PTY path — see
+> [`docs/NATIVE_WINDOWS.md`](docs/NATIVE_WINDOWS.md) for setup, start/stop, and config.
+> **WSL2** (run `install.sh` inside Ubuntu) is also fully supported.
 
 **All platforms** — the installer checks **Python ≥3.10** and **Claude Code** (`claude`); it
 stops and tells you to install them if missing. It does **not** need git (falls back to curl)

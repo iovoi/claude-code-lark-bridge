@@ -402,7 +402,15 @@ def _winpty_spawn(argv: list[str], env: dict) -> tuple:
     spawn = getattr(pty_obj, "spawn", None) or getattr(PTY, "spawn", None)
     if spawn is None:
         raise RuntimeError("winpty PTY exposes no spawn()")
-    spawn(subprocess.list2cmdline(argv), cwd=str(REPO), env=env)
+    # pywinpty >=2 PTY.spawn(appname, cmdline=None, cwd=None, env=None) wants:
+    #   appname = bare executable (argv[0]); cmdline = full quoted command line;
+    #   env     = a single NUL-separated 'KEY=VALUE' string (CreateProcessW
+    #             lpEnvironment layout), NOT a dict (a dict raises
+    #             "'dict' object is not an instance of 'str'").
+    appname = argv[0]
+    cmdline = subprocess.list2cmdline(argv)
+    env_str = "\0".join(f"{k}={v}" for k, v in env.items()) + "\0"
+    spawn(appname, cmdline, cwd=str(REPO), env=env_str)
     pid = getattr(pty_obj, "pid", None)
     return pty_obj, pid
 
@@ -438,7 +446,7 @@ def _keeper_windows_pty(argv: list[str], session_id: str) -> int:
     if pid:
         PID_FILE.write_text(str(pid))
     SESSION_FILE.write_text(session_id)
-    buf = b""; dev_done = bypass_done = False
+    buf = b""; trust_done = mcp_done = bypass_done = False
     runner = _WatchdogRunner(_write)
     while True:
         # Exit when the spawned claude dies (newer winpty exposes isalive()).
@@ -463,9 +471,17 @@ def _keeper_windows_pty(argv: list[str], session_id: str) -> int:
                     pass
             buf += data
             clean = ansi.sub(b"", buf)
-            if not dev_done and b"development" in clean:
-                _write(b"\r"); dev_done = True
-            elif not bypass_done and (b"Yes,Iaccept" in clean or b"No,exit" in clean):
+            ws = re.sub(rb"\s+", b"", clean)  # whitespace-collapsed -> spacing-independent
+            # Native-Windows first-run dialogs (order not fixed; match each by its own text):
+            # Workspace trust '1. Yes, I trust this folder / 2. No, exit' -> Enter picks opt 1.
+            if not trust_done and (b"trustthisfolder" in ws or b"isthisaprojectyoucreated" in ws):
+                _write(b"\r"); trust_done = True
+            # MCP-server approval '1. Use this MCP server / ...' -> Enter picks option 1.
+            elif not mcp_done and (b"usethismcpserver" in ws or b"newmcpserverfound" in ws):
+                _write(b"\r"); mcp_done = True
+            # Dev-channel/dangerous '1. No, exit / 2. Yes, I accept' -> '2' picks Yes. Match
+            # ONLY on 'Yes,Iaccept' -- never 'No,exit', which also appears in the trust dialog.
+            elif not bypass_done and b"Yes,Iaccept" in ws:
                 _write(b"2\r\x1b[B\r"); bypass_done = True
             runner.on_chunk(data)
         else:

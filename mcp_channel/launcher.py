@@ -402,7 +402,15 @@ def _winpty_spawn(argv: list[str], env: dict) -> tuple:
     spawn = getattr(pty_obj, "spawn", None) or getattr(PTY, "spawn", None)
     if spawn is None:
         raise RuntimeError("winpty PTY exposes no spawn()")
-    spawn(subprocess.list2cmdline(argv), cwd=str(REPO), env=env)
+    # pywinpty >=2 PTY.spawn(appname, cmdline=None, cwd=None, env=None) wants:
+    #   appname = bare executable (argv[0]); cmdline = full quoted command line;
+    #   env     = a single NUL-separated 'KEY=VALUE' string (CreateProcessW
+    #             lpEnvironment layout), NOT a dict (a dict raises
+    #             "'dict' object is not an instance of 'str'").
+    appname = argv[0]
+    cmdline = subprocess.list2cmdline(argv)
+    env_str = "\0".join(f"{k}={v}" for k, v in env.items()) + "\0"
+    spawn(appname, cmdline, cwd=str(REPO), env=env_str)
     pid = getattr(pty_obj, "pid", None)
     return pty_obj, pid
 

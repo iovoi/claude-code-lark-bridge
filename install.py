@@ -238,10 +238,18 @@ def make_venv() -> None:
         _step(f"installing bridge package + deps via uv (faster than pip){suffix} …")
         # uv pip resolves + installs in seconds vs pip's minutes; -e editable so
         # `git pull` of the repo is reflected without reinstall. Fall back to pip.
-        rc = subprocess.run([uv, "pip", "install", "-e", target], check=False).returncode
+        # On native Windows, uv (>=0.5) launched from a fresh install.py won't see the
+        # just-created venv (no VIRTUAL_ENV, cwd is not the venv parent) and aborts with
+        # "No virtual environment found". Set VIRTUAL_ENV so uv installs into our venv.
+        # (POSIX already finds it; left untouched to preserve the WSL path.)
+        install_env = dict(os.environ)
+        if os.name == "nt":
+            install_env["VIRTUAL_ENV"] = str(VENV)
+        rc = subprocess.run([uv, "pip", "install", "-e", target], check=False,
+                            env=install_env).returncode
         if rc != 0:
             # editable may fail on some setups; fall back to a plain path install.
-            subprocess.run([uv, "pip", "install", target], check=True)
+            subprocess.run([uv, "pip", "install", target], check=True, env=install_env)
         _done("bridge package + deps installed")
     _done(f"venv ready; uvx at {_venv_bin('uvx')}")
 
@@ -273,18 +281,25 @@ def fetch_repo() -> None:
 
 
 def configure_mcp() -> None:
-    """Rewrite .mcp.json to use the venv's uvx (absolute, OS-correct) + the local repo.
-    On Windows, add --extra windows so the uvx-fetched env includes pywinpty."""
+    """Rewrite .mcp.json to point the feishu MCP server at the venv.
+
+    Native Windows uses the venv's ``python -m mcp_channel`` directly: the
+    installer otherwise writes ``uvx --extra windows feishu-channel``, but uv
+    >=0.7's ``uvx`` has no ``--extra`` flag, so uvx errors out and the channel
+    server never starts. POSIX/WSL keeps the ``uvx --from`` form (no extra
+    needed there)."""
     import json
-    uvx = _venv_bin("uvx")
-    args = ["--from", str(REPO)]
     if os.name == "nt":
-        args += ["--extra", "windows"]
-    args += ["feishu-channel"]
-    mcp = {"mcpServers": {"feishu": {"command": uvx, "args": args}}}
-    (REPO / ".mcp.json").write_text(json.dumps(mcp, indent=2), encoding="utf-8")
-    _step(f".mcp.json -> venv uvx ({uvx}) + repo ({REPO})" +
-          (" (+windows)" if os.name == "nt" else ""))
+        py = _venv_bin("python")
+        mcp = {"mcpServers": {"feishu": {"command": py, "args": ["-m", "mcp_channel"]}}}
+        (REPO / ".mcp.json").write_text(json.dumps(mcp, indent=2), encoding="utf-8")
+        _step(f".mcp.json -> venv python ({py}) -m mcp_channel (native Windows)")
+    else:
+        uvx = _venv_bin("uvx")
+        args = ["--from", str(REPO), "feishu-channel"]
+        mcp = {"mcpServers": {"feishu": {"command": uvx, "args": args}}}
+        (REPO / ".mcp.json").write_text(json.dumps(mcp, indent=2), encoding="utf-8")
+        _step(f".mcp.json -> venv uvx ({uvx}) + repo ({REPO})")
     _done(".mcp.json written")
 
 

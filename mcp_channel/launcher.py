@@ -446,7 +446,7 @@ def _keeper_windows_pty(argv: list[str], session_id: str) -> int:
     if pid:
         PID_FILE.write_text(str(pid))
     SESSION_FILE.write_text(session_id)
-    buf = b""; dev_done = bypass_done = False
+    buf = b""; trust_done = mcp_done = bypass_done = False
     runner = _WatchdogRunner(_write)
     while True:
         # Exit when the spawned claude dies (newer winpty exposes isalive()).
@@ -471,9 +471,17 @@ def _keeper_windows_pty(argv: list[str], session_id: str) -> int:
                     pass
             buf += data
             clean = ansi.sub(b"", buf)
-            if not dev_done and b"development" in clean:
-                _write(b"\r"); dev_done = True
-            elif not bypass_done and (b"Yes,Iaccept" in clean or b"No,exit" in clean):
+            ws = re.sub(rb"\s+", b"", clean)  # whitespace-collapsed -> spacing-independent
+            # Native-Windows first-run dialogs (order not fixed; match each by its own text):
+            # Workspace trust '1. Yes, I trust this folder / 2. No, exit' -> Enter picks opt 1.
+            if not trust_done and (b"trustthisfolder" in ws or b"isthisaprojectyoucreated" in ws):
+                _write(b"\r"); trust_done = True
+            # MCP-server approval '1. Use this MCP server / ...' -> Enter picks option 1.
+            elif not mcp_done and (b"usethismcpserver" in ws or b"newmcpserverfound" in ws):
+                _write(b"\r"); mcp_done = True
+            # Dev-channel/dangerous '1. No, exit / 2. Yes, I accept' -> '2' picks Yes. Match
+            # ONLY on 'Yes,Iaccept' -- never 'No,exit', which also appears in the trust dialog.
+            elif not bypass_done and b"Yes,Iaccept" in ws:
                 _write(b"2\r\x1b[B\r"); bypass_done = True
             runner.on_chunk(data)
         else:

@@ -39,6 +39,80 @@ def is_stale(create_time, boot_time: float) -> bool:
     return ct < int(boot_time)
 
 
+def extract_text(message_type: str, content: dict) -> str:
+    """Best-effort PLAIN TEXT from a Feishu/Lark message body.
+
+    Handles:
+      * "text"  -> the text field
+      * "post"  -> rich-text: {<locale>: {title, content: [[{tag,...}, ...], ...]}}
+                   flattened to title + one line per content row, with text/a/
+                   mention/at node text joined. Image/media nodes contribute no
+                   text (an image-only post returns "" so the caller can say so).
+
+    Other types (image, file, interactive card, ...) return "" — the caller falls
+    back to a "[<type> message]" placeholder. Pure and dependency-free so it is
+    unit-testable without lark_oapi."""
+    if not isinstance(content, dict):
+        return ""
+    if message_type == "text":
+        return str(content.get("text", "") or "")
+    if message_type == "post":
+        return _post_to_text(content)
+    return ""
+
+
+# Preferred locale keys in order; Feishu wraps the body as {"zh_cn": {...}} etc.
+_POST_LOCALES = ("zh_cn", "en_us", "ja_jp", "ko_kr", "en", "zh")
+
+
+def _post_locale(content: dict) -> dict:
+    """Return the locale body dict of a post message, tolerating a missing locale
+    wrapper (some clients send {title, content} directly)."""
+    for k in _POST_LOCALES:
+        v = content.get(k)
+        if isinstance(v, dict):
+            return v
+    if isinstance(content, dict) and ("content" in content or "title" in content):
+        return content
+    for v in content.values():
+        if isinstance(v, dict):
+            return v
+    return {}
+
+
+def _node_text(node: dict) -> str:
+    """Plain text for one rich-text node. Text/a carry .text; at/mention carry a
+    user name; image/media/sticker carry none (they're not text)."""
+    if not isinstance(node, dict):
+        return ""
+    tag = node.get("tag")
+    if tag in ("text", "a"):
+        return str(node.get("text", "") or "")
+    if tag in ("at", "mention"):
+        return str(node.get("name") or node.get("text") or "")
+    # image / media / sticker / unknown: no extractable text
+    return ""
+
+
+def _post_to_text(content: dict) -> str:
+    locale = _post_locale(content)
+    if not locale:
+        return ""
+    parts: list[str] = []
+    title = locale.get("title")
+    if title:
+        parts.append(str(title))
+    rows = locale.get("content")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            line = "".join(_node_text(n) for n in row if isinstance(n, dict))
+            if line:
+                parts.append(line)
+    return "\n".join(parts).strip()
+
+
 def start_ws(on_message) -> threading.Thread:
     """Start the Feishu websocket client in a daemon thread; return the thread.
 
@@ -59,10 +133,7 @@ def start_ws(on_message) -> threading.Thread:
                     content = json.loads(msg.content or "{}")
                 except Exception:
                     content = {}
-                if msg.message_type == "text":
-                    text = content.get("text", "")
-                else:
-                    text = ""  # non-text handled as "[<type> message]" by the caller
+                text = extract_text(getattr(msg, "message_type", ""), content)
                 evt = {
                     "message_id": msg.message_id,
                     "chat_id": getattr(msg, "chat_id", None),

@@ -255,6 +255,115 @@ def _claude_argv(mode: str, session_id: str, resume: bool) -> list[str]:
 
 
 # ---------- keeper (internal, long-lived PTY supervisor) ----------
+# Keystroke forwarding: map a user's Feishu reply token -> bytes typed into the
+# PTY. Named keys cover the common interactive-prompt answers; anything else is
+# typed verbatim followed by Enter.
+_KEY_BYTES = {
+    "enter": b"\r",
+    "return": b"\r",
+    "esc": b"\x1b",
+    "escape": b"\x1b",
+    "tab": b"\t",
+    "up": b"\x1b[A",
+    "down": b"\x1b[B",
+    "left": b"\x1b[D",
+    "right": b"\x1b[C",
+    "y": b"y\r",
+    "yes": b"y\r",
+    "n": b"n\r",
+    "no": b"n\r",
+    "space": b" ",
+}
+
+
+def _keystroke_to_bytes(text: str) -> bytes:
+    """A reply is EITHER a sequence of named keys (e.g. 'down enter', 'y') — in
+    which case each maps to its bytes and they're concatenated — OR literal prose,
+    typed verbatim followed by a single Enter. We decide by: if every whitespace
+    token is a known key, treat as keys; otherwise treat the whole string as prose
+    (so 'hello world' becomes 'hello world\\r', not 'hello\\rworld\\r')."""
+    text = (text or "").strip()
+    if not text:
+        return b"\r"
+    tokens = text.split()
+    if all(t in _KEY_BYTES for t in tokens):
+        return b"".join(_KEY_BYTES[t] for t in tokens)
+    return text.encode("utf-8", "replace") + b"\r"
+
+
+def _sender_loop(send_q: "queue.Queue") -> None:
+    """Deprecated stub: the keeper runs under the system python, which lacks
+    lark_oapi, so it cannot send Feishu messages itself. Outgoing watchdog
+    messages are queued to the outbox (bridgestate.push_outbox) and the MCP
+    server (which has lark) drains + sends them. Kept only to avoid churn."""
+    return
+
+
+class _WatchdogRunner:
+    """Owns one Watchdog; the keeper calls on_chunk()/tick(). Keeps the watchdog
+    logic out of the POSIX/Windows keeper duplication.
+
+    Outgoing Feishu messages (progress/stuck alerts) are NOT sent from here —
+    the keeper's python has no lark_oapi. They are queued to the outbox and the
+    MCP server sends them. Only PTY writes (keystroke forwarding) happen here."""
+
+    def __init__(self, write_pty) -> None:
+        from mcp_channel.watchdog import Watchdog
+        from mcp_channel import bridgestate
+        self.wd = Watchdog(time.time())
+        self.bridgestate = bridgestate
+        self.write_pty = write_pty
+
+    def on_chunk(self, data: bytes) -> None:
+        if data:
+            self.wd.feed(data, time.time())
+
+    def tick(self) -> None:
+        now = time.time()
+        active = None
+        try:
+            active = self.bridgestate.read_active()
+        except Exception as e:
+            print(f"[watchdog] read_active failed: {e}", file=sys.stderr)
+        try:
+            actions = self.wd.tick(active, now)
+        except Exception as e:
+            print(f"[watchdog] tick failed: {e}", file=sys.stderr)
+            actions = []
+        for a in actions:
+            kind = type(a).__name__
+            try:
+                if kind == "SendProgress":
+                    self.bridgestate.push_outbox(a.chat_id, a.text)
+                    print(f"[watchdog] queued progress for {a.chat_id}", file=sys.stderr)
+                elif kind == "SendStuck":
+                    self.bridgestate.push_outbox(a.chat_id, a.screen_text)
+                    self.bridgestate.write_stuck(awaiting_keystroke=True, alerted=True,
+                                                 stuck_screen=a.screen_text, updated_at=now)
+                    print(f"[watchdog] queued stuck alert for {a.chat_id}", file=sys.stderr)
+                elif kind == "ClearStuck":
+                    self.bridgestate.clear_stuck()
+            except Exception as e:
+                print(f"[watchdog] action {kind} failed: {e}", file=sys.stderr)
+        # Drain pending keystrokes (only meaningful while awaiting, but cheap to
+        # check). Each is typed into the PTY; applying one resolves the stuck state.
+        try:
+            if self.bridgestate.is_awaiting_keystroke():
+                for k in self.bridgestate.drain_keystrokes():
+                    payload = _keystroke_to_bytes(k.get("text", ""))
+                    try:
+                        self.write_pty(payload)
+                    except Exception as e:
+                        print(f"[watchdog] pty write failed: {e}", file=sys.stderr)
+                    self.bridgestate.clear_stuck()
+                    self.wd.note_resolved(time.time())
+        except Exception as e:
+            print(f"[watchdog] keystroke drain failed: {e}", file=sys.stderr)
+
+    def stop(self) -> None:
+        pass
+
+
 def _keeper_windows(argv: list[str], session_id: str) -> int:
     """Windows PTY-keeper via pywinpty (AC7). Best-effort; needs verification on Windows.
     pywinpty's PTY.open/spawn/read/write replace POSIX pty+select; the spawned process is
@@ -264,6 +373,12 @@ def _keeper_windows(argv: list[str], session_id: str) -> int:
     from pywinpty import PTY
     _ensure_state()
     env = dict(os.environ); env["FEISHU_BRIDGE"] = "1"; env["FEISHU_CHANNEL_LOG"] = LOG_PATH
+    # Force uvx to rebuild the feishu-channel MCP server from source on every
+    # launch. The repo lives on a WSL /mnt/c (drvfs) filesystem whose unreliable
+    # mtimes/inodes defeat uv's source-change detection, so a cached wheel can
+    # mask server.py edits (the bridge silently runs stale code). UV_NO_CACHE
+    # trades ~10-60s of boot time (re-resolving deps) for guaranteed-fresh code.
+    env["UV_NO_CACHE"] = "1"
     pty_obj = PTY.open(80, 24)
     pty_obj.spawn(subprocess.list2cmdline(argv), cwd=str(REPO), env=env)
     try:
@@ -276,6 +391,7 @@ def _keeper_windows(argv: list[str], session_id: str) -> int:
         PID_FILE.write_text(str(pid))
     SESSION_FILE.write_text(session_id)
     buf = b""; dev_done = bypass_done = False
+    runner = _WatchdogRunner(lambda payload: pty_obj.write(payload))
     while True:
         try:
             data = pty_obj.read()
@@ -297,8 +413,11 @@ def _keeper_windows(argv: list[str], session_id: str) -> int:
                 try: pty_obj.write(b"2\r\x1b[B\r")
                 except Exception: pass
                 bypass_done = True
+            runner.on_chunk(data)
         else:
             time.sleep(0.2)
+        runner.tick()
+    runner.stop()
     try:
         pty_obj.close()
     except Exception:
@@ -312,6 +431,15 @@ def _keeper_windows(argv: list[str], session_id: str) -> int:
 
 def keeper(argv: list[str], session_id: str) -> int:
     """PTY-keeper dispatcher: pywinpty on Windows, POSIX pty elsewhere (AC7)."""
+    # The keeper is spawned with stderr=DEVNULL by up(), which would make its
+    # diagnostics ([watchdog] lines) invisible. Redirect our own stderr to the
+    # shared log so watchdog state/errors are observable alongside claude's TTY
+    # output. (Claude's output is teed separately; both land in LOG_PATH.)
+    try:
+        sys.stderr = open(LOG_PATH, "a", buffering=1)
+    except Exception:
+        pass
+    print(f"[keeper] starting (pid={os.getpid()}, session={session_id})", file=sys.stderr)
     if platform.system() == "Windows":
         return _keeper_windows(argv, session_id)
     return _keeper_posix(argv, session_id)
@@ -327,6 +455,7 @@ def _keeper_posix(argv: list[str], session_id: str) -> int:
     env = dict(os.environ)
     env["FEISHU_BRIDGE"] = "1"
     env["FEISHU_CHANNEL_LOG"] = LOG_PATH
+    env["UV_NO_CACHE"] = "1"  # see _keeper_windows: drvfs-safe rebuild of the server
     p = subprocess.Popen(argv, cwd=str(REPO), env=env,
                          stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
     os.close(slave)
@@ -340,6 +469,10 @@ def _keeper_posix(argv: list[str], session_id: str) -> int:
     ansi = re.compile(rb"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[<>][0-9a-z]*")
     buf = b""
     dev_done = bypass_done = False
+    # Watchdog: monitors Claude's TTY stream for "stuck on a prompt" vs "working",
+    # forwards progress/stuck alerts to the user, and types the user's reply into
+    # the PTY to un-stick it. Writes go through os.write(master, ...) below.
+    runner = _WatchdogRunner(lambda payload: os.write(master, payload))
     while True:
         rc = p.poll()
         if rc is not None:
@@ -371,6 +504,11 @@ def _keeper_posix(argv: list[str], session_id: str) -> int:
                 try: os.write(master, b"2\r\x1b[B\r")
                 except OSError: pass
                 bypass_done = True
+            runner.on_chunk(data)
+        # tick every iteration (~1s) whether or not data arrived, so we detect
+        # idle wedges (no output) as well as explicit prompts.
+        runner.tick()
+    runner.stop()
     try:
         PID_FILE.unlink()
     except OSError:

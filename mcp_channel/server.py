@@ -39,6 +39,7 @@ from mcp.types import TextContent, Tool
 import feishu_api as api  # import first: its load_env() populates os.environ from .env
 from . import access
 from . import feishu_ingest
+from . import bridgestate
 
 BOOT_TIME = time.time()
 
@@ -70,6 +71,11 @@ def _finish_working(chat_id) -> None:
     """On reply: stamp done on the originating message and clear the working emoji."""
     if not chat_id:
         return
+    # Task is done -> tell the watchdog to stop monitoring it.
+    try:
+        bridgestate.clear_active()
+    except Exception as e:
+        print(f"[state] clear_active failed: {e}", file=sys.stderr)
     with _REACTION_LOCK:
         entry = _REACTIONS.pop(chat_id, None)
     if not entry:
@@ -109,8 +115,11 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="reply",
             description=(
-                "Send a text message to a Feishu/Lark chat. Use the chat_id from the "
-                "incoming message's meta, or a known chat_id."
+                "Send your reply to the user in this Feishu/Lark chat. This is the "
+                "ONLY way the user receives your response — any text you type in the "
+                "conversation is NOT delivered to them. You MUST call this tool to "
+                "reply, using the chat_id from the incoming message's meta. Call it "
+                "exactly once per response, with your full answer as `text`."
             ),
             inputSchema={
                 "type": "object",
@@ -189,16 +198,36 @@ def _build_notification(evt: dict) -> ChannelNotification:
 
 async def _push(session: ServerSession, evt: dict) -> None:
     mid = evt.get("message_id")
+    chat_id = evt.get("chat_id") or ""
     if feishu_ingest.is_stale(evt.get("create_time"), BOOT_TIME):
         print(f"[push] stale {mid} dropped", file=sys.stderr)
         return
-    if not access.allowed(evt.get("open_id"), evt.get("chat_id")):
+    if not access.allowed(evt.get("open_id"), chat_id):
         print(f"[access] denied {mid} user={evt.get('open_id')}", file=sys.stderr)
         return
+    # Keystroke forwarding: if the watchdog has the bridge in "awaiting keystroke"
+    # mode (Claude is stuck on an interactive prompt), route the user's reply to
+    # the keystroke queue instead of injecting it as a new Claude turn. The keeper
+    # drains the queue and types it into the PTY.
+    text = evt.get("text") or ""
+    try:
+        if bridgestate.is_awaiting_keystroke():
+            bridgestate.push_keystroke(text)
+            print(f"[push] intercepted as keystroke {mid} chat={chat_id} text={text[:60]!r}",
+                  file=sys.stderr)
+            return
+    except Exception as e:
+        print(f"[state] keystroke-intercept check failed: {e}", file=sys.stderr)
     notification = _build_notification(evt)
-    _stamp_working(evt.get("chat_id"), mid)
+    _stamp_working(chat_id, mid)
+    # Record the active task so the keeper's watchdog knows something is in flight.
+    try:
+        bridgestate.write_active(chat_id, mid or "", time.time(),
+                                 content_preview=(notification.params.content or "")[:80])
+    except Exception as e:
+        print(f"[state] write_active failed: {e}", file=sys.stderr)
     await session.send_notification(notification)
-    print(f"[push] {mid} chat={evt.get('chat_id')} content={notification.params.content[:60]!r}",
+    print(f"[push] {mid} chat={chat_id} content={notification.params.content[:60]!r}",
           file=sys.stderr)
 
 
@@ -237,6 +266,27 @@ async def main() -> None:
             except Exception as e:
                 print(f"[push] error: {e}", file=sys.stderr)
 
+    async def outbox_drain() -> None:
+        """Send watchdog messages (progress/stuck alerts) queued by the keeper.
+        The keeper runs under the system python (no lark_oapi), so it can only
+        write the outbox; this server (uvx env, has lark) does the actual send."""
+        await initialized.wait()
+        while True:
+            try:
+                for msg in bridgestate.drain_outbox():
+                    try:
+                        mid = await anyio.to_thread.run_sync(
+                            api.send_text, msg["chat_id"], msg["text"])
+                        ok = mid is not None
+                    except Exception as e:
+                        ok = False
+                        print(f"[outbox] send failed: {e}", file=sys.stderr)
+                    print(f"[outbox] {msg['chat_id']} -> {'sent' if ok else 'failed'}: "
+                          f"{msg['text'][:50]!r}", file=sys.stderr)
+            except Exception as e:
+                print(f"[outbox] drain error: {e}", file=sys.stderr)
+            await anyio.sleep(2.0)
+
     async with stdio_server() as (read_stream, write_stream):
         async with AsyncExitStack() as stack:
             session = await stack.enter_async_context(
@@ -244,6 +294,7 @@ async def main() -> None:
             )
             async with anyio.create_task_group() as tg:
                 tg.start_soon(drain, session)
+                tg.start_soon(outbox_drain)
                 try:
                     async for message in session.incoming_messages:
                         if not initialized.is_set():

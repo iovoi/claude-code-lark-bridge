@@ -7,17 +7,32 @@ asserts:
   * tools/list exposes `reply` and `react`;
   * tools/call `reply` runs and returns a content block.
 
-Run:  .venv/bin/python tests/stdio_smoke.py
+Run:  .venv/bin/python tests/stdio_smoke.py      (POSIX)
+      .venv\\Scripts\\python.exe tests/stdio_smoke.py   (Windows)
 """
+import os
 import sys
+from pathlib import Path
+
 import anyio
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.session import ClientSession
 
 
+def _venv_python() -> str:
+    """The venv interpreter, OS-correct. Falls back to sys.executable (the python
+    running this test) if the venv layout isn't where we expect."""
+    here = Path(__file__).resolve().parent.parent
+    if os.name == "nt":
+        exe = here / ".venv" / "Scripts" / "python.exe"
+    else:
+        exe = here / ".venv" / "bin" / "python"
+    return str(exe) if exe.is_file() else sys.executable
+
+
 async def main() -> None:
     params = StdioServerParameters(
-        command=".venv/bin/python",
+        command=_venv_python(),
         args=["-m", "mcp_channel"],
         env={
             "PATH": "",  # inherit handled below; dummy env keeps ws offline
@@ -27,9 +42,8 @@ async def main() -> None:
         },
     )
     # stdio_client merges env over the parent env; keep PATH/terminfo from parent.
-    import os
     params.env.update({k: v for k, v in os.environ.items()
-                       if k in ("PATH", "TERM", "HOME", "LANG", "LC_ALL")})
+                       if k in ("PATH", "TERM", "HOME", "LANG", "LC_ALL", "SYSTEMROOT")})
 
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client:

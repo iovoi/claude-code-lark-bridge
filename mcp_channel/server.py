@@ -288,6 +288,8 @@ async def main() -> None:
             await anyio.sleep(2.0)
 
     async with stdio_server() as (read_stream, write_stream):
+        print("[handshake] stdio transport ready, waiting for client initialize…",
+              file=sys.stderr)
         async with AsyncExitStack() as stack:
             session = await stack.enter_async_context(
                 ServerSession(read_stream, write_stream, init_opts)
@@ -298,7 +300,12 @@ async def main() -> None:
                 try:
                     async for message in session.incoming_messages:
                         if not initialized.is_set():
-                            initialized.set()  # client has finished the handshake
+                            # First message routed here => the MCP initialize
+                            # handshake completed at the transport/session layer.
+                            initialized.set()
+                            print(f"[handshake] complete (first msg: "
+                                  f"{getattr(message, 'root', message).__class__.__name__})",
+                                  file=sys.stderr)
                         tg.start_soon(app._handle_message, message, session, None, False)
                 finally:
                     tg.cancel_scope.cancel()

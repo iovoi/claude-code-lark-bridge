@@ -364,40 +364,98 @@ class _WatchdogRunner:
         pass
 
 
-def _keeper_windows(argv: list[str], session_id: str) -> int:
-    """Windows PTY-keeper via pywinpty (AC7). Best-effort; needs verification on Windows.
-    pywinpty's PTY.open/spawn/read/write replace POSIX pty+select; the spawned process is
-    already detached by pywinpty, so the launcher's CREATE_NEW_PROCESS_GROUP keeps the
-    keeper itself detached from the agent."""
+def _import_winpty():
+    """Import the winpty PTY class. The PyPI package is `pywinpty`, but its
+    importable module is `winpty` in current releases (≥2); very old releases
+    exposed `from pywinpty import PTY`. Try both, return the PTY class, raise the
+    last error if neither imports (so the caller can fall back to no-PTY)."""
+    last = None
+    for modname in ("winpty", "pywinpty"):
+        try:
+            mod = __import__(modname)
+            return getattr(mod, "PTY")
+        except Exception as e:  # ImportError, AttributeError, …
+            last = e
+    raise last
+
+
+def _make_pty(PTY):
+    """Construct a PTY across pywinpty API revisions. ≥2.x uses `PTY()` (or the
+    classmethod PTY.open(cols, rows)); older builds only had PTY.open. Try the
+    documented shapes; raise if none work (caller falls back)."""
+    for make in (lambda: PTY(80, 24), lambda: PTY.open(80, 24)):
+        try:
+            return make()
+        except Exception:
+            continue
+    raise RuntimeError("could not construct a winpty PTY (no PTY()/PTY.open)") from None
+
+
+def _winpty_spawn(argv: list[str], env: dict) -> tuple:
+    """Open a Windows PTY via pywinpty and spawn argv in it. Returns
+    (pty_obj, pid_or_None). Raises on ANY incompatibility (wrong import name,
+    changed API, missing build) so _keeper_windows can fall back to a no-PTY
+    detach — the PRD's documented degradation path."""
+    PTY = _import_winpty()
+    pty_obj = _make_pty(PTY)
+    # spawn may be a classmethod (returns the instance) or an instance method.
+    spawn = getattr(pty_obj, "spawn", None) or getattr(PTY, "spawn", None)
+    if spawn is None:
+        raise RuntimeError("winpty PTY exposes no spawn()")
+    spawn(subprocess.list2cmdline(argv), cwd=str(REPO), env=env)
+    pid = getattr(pty_obj, "pid", None)
+    return pty_obj, pid
+
+
+def _keeper_windows_pty(argv: list[str], session_id: str) -> int:
+    """PTY-keeper via pywinpty. spawn/read/write/close replace POSIX pty+select.
+    Raises if pywinpty is missing or its API is incompatible — the caller then
+    falls back to _keeper_windows_no_pty."""
     import re
-    from pywinpty import PTY
     _ensure_state()
-    env = dict(os.environ); env["FEISHU_BRIDGE"] = "1"; env["FEISHU_CHANNEL_LOG"] = LOG_PATH
+    env = dict(os.environ)
+    env["FEISHU_BRIDGE"] = "1"; env["FEISHU_CHANNEL_LOG"] = LOG_PATH
     # Force uvx to rebuild the feishu-channel MCP server from source on every
     # launch. The repo lives on a WSL /mnt/c (drvfs) filesystem whose unreliable
     # mtimes/inodes defeat uv's source-change detection, so a cached wheel can
     # mask server.py edits (the bridge silently runs stale code). UV_NO_CACHE
     # trades ~10-60s of boot time (re-resolving deps) for guaranteed-fresh code.
     env["UV_NO_CACHE"] = "1"
-    pty_obj = PTY.open(80, 24)
-    pty_obj.spawn(subprocess.list2cmdline(argv), cwd=str(REPO), env=env)
+    pty_obj, pid = _winpty_spawn(argv, env)
     try:
         logf = open(LOG_PATH, "a", buffering=1)
     except Exception:
         logf = None
     ansi = re.compile(rb"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[<>][0-9a-z]*")
-    pid = getattr(pty_obj, "pid", None)
+
+    def _write(payload: bytes) -> None:
+        # winpty PTY.write takes a str; the watchdog hands us bytes.
+        try:
+            pty_obj.write(payload.decode("utf-8", "replace"))
+        except Exception:
+            pass
+
     if pid:
         PID_FILE.write_text(str(pid))
     SESSION_FILE.write_text(session_id)
     buf = b""; dev_done = bypass_done = False
-    runner = _WatchdogRunner(lambda payload: pty_obj.write(payload))
+    runner = _WatchdogRunner(_write)
     while True:
+        # Exit when the spawned claude dies (newer winpty exposes isalive()).
+        isalive = getattr(pty_obj, "isalive", None)
+        if callable(isalive):
+            try:
+                if not isalive():
+                    break
+            except Exception:
+                pass
         try:
             data = pty_obj.read()
         except Exception:
             break
         if data:
+            if isinstance(data, str):
+                data = data.encode("utf-8", "replace")
             if logf:
                 try:
                     logf.write(data.decode(errors="replace")); logf.flush()
@@ -406,13 +464,9 @@ def _keeper_windows(argv: list[str], session_id: str) -> int:
             buf += data
             clean = ansi.sub(b"", buf)
             if not dev_done and b"development" in clean:
-                try: pty_obj.write(b"\r")
-                except Exception: pass
-                dev_done = True
+                _write(b"\r"); dev_done = True
             elif not bypass_done and (b"Yes,Iaccept" in clean or b"No,exit" in clean):
-                try: pty_obj.write(b"2\r\x1b[B\r")
-                except Exception: pass
-                bypass_done = True
+                _write(b"2\r\x1b[B\r"); bypass_done = True
             runner.on_chunk(data)
         else:
             time.sleep(0.2)
@@ -427,6 +481,56 @@ def _keeper_windows(argv: list[str], session_id: str) -> int:
     except OSError:
         pass
     return 0
+
+
+def _keeper_windows_no_pty(argv: list[str], session_id: str) -> int:
+    """Degraded Windows keeper used when pywinpty is unavailable or incompatible.
+    Launches claude detached (stdout/stderr → log), but with NO PTY we cannot
+    auto-confirm the dev-channels / bypass dialogs — so claude may wedge on a
+    confirmation prompt. bypassPermissions mode (skipDangerousModePermissionPrompt)
+    avoids the bypass dialog; the dev-channels dialog still needs a TTY. This is a
+    last resort documented in the PRD; WSL2 remains the verified Windows path."""
+    _ensure_state()
+    env = dict(os.environ)
+    env["FEISHU_BRIDGE"] = "1"; env["FEISHU_CHANNEL_LOG"] = LOG_PATH
+    env["UV_NO_CACHE"] = "1"
+    try:
+        logf = open(LOG_PATH, "a", buffering=1)
+    except Exception:
+        logf = subprocess.DEVNULL
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    p = subprocess.Popen(argv, cwd=str(REPO), env=env,
+                         stdin=subprocess.DEVNULL, stdout=logf, stderr=logf,
+                         creationflags=flags)
+    PID_FILE.write_text(str(p.pid))
+    SESSION_FILE.write_text(session_id)
+    # No PTY to write keystrokes into; keep the watchdog ticking so the outbox
+    # (progress/stuck alerts) still drains. Exit when claude exits.
+    runner = _WatchdogRunner(lambda payload: None)
+    while True:
+        runner.tick()
+        if p.poll() is not None:
+            break
+        time.sleep(1)
+    runner.stop()
+    try:
+        PID_FILE.unlink()
+    except OSError:
+        pass
+    return p.returncode if p.poll() is not None else 0
+
+
+def _keeper_windows(argv: list[str], session_id: str) -> int:
+    """Windows keeper: PTY (pywinpty) first, with an automatic no-PTY detach
+    fallback if pywinpty is missing/incompatible (the PRD's degradation path).
+    See _keeper_windows_pty / _keeper_windows_no_pty."""
+    try:
+        return _keeper_windows_pty(argv, session_id)
+    except Exception as e:
+        print(f"[keeper] pywinpty PTY unavailable/incompatible ({e!r}); "
+              f"falling back to NO-PTY detached launch (interactive dialogs will "
+              f"NOT be auto-confirmed — prefer WSL2).", file=sys.stderr)
+        return _keeper_windows_no_pty(argv, session_id)
 
 
 def keeper(argv: list[str], session_id: str) -> int:

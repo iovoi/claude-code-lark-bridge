@@ -334,10 +334,10 @@ class _WatchdogRunner:
             kind = type(a).__name__
             try:
                 if kind == "SendProgress":
-                    self.bridgestate.push_outbox(a.chat_id, a.text)
+                    self.bridgestate.push_outbox(a.chat_id, a.text, kind="progress")
                     print(f"[watchdog] queued progress for {a.chat_id}", file=sys.stderr)
                 elif kind == "SendStuck":
-                    self.bridgestate.push_outbox(a.chat_id, a.screen_text)
+                    self.bridgestate.push_outbox(a.chat_id, a.screen_text, kind="stuck")
                     self.bridgestate.write_stuck(awaiting_keystroke=True, alerted=True,
                                                  stuck_screen=a.screen_text, updated_at=now)
                     print(f"[watchdog] queued stuck alert for {a.chat_id}", file=sys.stderr)

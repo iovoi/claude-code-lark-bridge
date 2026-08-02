@@ -156,6 +156,31 @@ def send_text(chat_id: str, text: str):
     return None
 
 
+def update_text(message_id: str, text: str) -> bool:
+    """Edit a text message the bot previously sent (PUT im/v1/messages/:id).
+
+    The bot can only edit its OWN messages, and the API only supports text / rich
+    text (post). Scope is satisfied by im:message:send_as_bot (already granted) —
+    no new permission needed. Returns True on success, False otherwise (fail-soft:
+    callers fall back to sending a fresh message)."""
+    from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
+    req = (
+        UpdateMessageRequest.builder()
+        .message_id(message_id)
+        .request_body(
+            UpdateMessageRequestBody.builder()
+            .content(json.dumps({"text": text}, ensure_ascii=False))
+            .build()
+        )
+        .build()
+    )
+    try:
+        resp = client().im.v1.message.update(req)
+    except Exception:
+        return False
+    return resp.success()
+
+
 def add_reaction(message_id: str, code: str):
     """Add an emoji reaction. Returns reaction_id or None (fail-soft)."""
     from lark_oapi.api.im.v1 import (

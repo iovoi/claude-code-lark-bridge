@@ -40,8 +40,15 @@ import feishu_api as api  # import first: its load_env() populates os.environ fr
 from . import access
 from . import feishu_ingest
 from . import bridgestate
+from .digest_tracker import DigestTracker
 
 BOOT_TIME = time.time()
+
+# Per-chat policy for the watchdog's working-status digests: edit the previous
+# digest in place while no new user message / reply / stuck alert has landed, so
+# a long task produces ONE tidy "🟢 Working …" message that updates itself
+# instead of a stack of new messages.
+_DIGESTS = DigestTracker()
 
 # --- working/done emoji cycle ---
 # chat_id -> (incoming_message_id, working_reaction_id). Bounded LRU.
@@ -71,6 +78,9 @@ def _finish_working(chat_id) -> None:
     """On reply: stamp done on the originating message and clear the working emoji."""
     if not chat_id:
         return
+    # Task is done -> the next working digest belongs to a future task, so it must
+    # be a fresh message (don't edit the digest from this finished task).
+    _DIGESTS.on_reply(chat_id)
     # Task is done -> tell the watchdog to stop monitoring it.
     try:
         bridgestate.clear_active()
@@ -220,6 +230,9 @@ async def _push(session: ServerSession, evt: dict) -> None:
         print(f"[state] keystroke-intercept check failed: {e}", file=sys.stderr)
     notification = _build_notification(evt)
     _stamp_working(chat_id, mid)
+    # A new user message starts a new task -> the next working digest must be a
+    # fresh message, not an edit of the previous task's digest.
+    _DIGESTS.on_inbound(chat_id)
     # Record the active task so the keeper's watchdog knows something is in flight.
     try:
         bridgestate.write_active(chat_id, mid or "", time.time(),
@@ -269,20 +282,57 @@ async def main() -> None:
     async def outbox_drain() -> None:
         """Send watchdog messages (progress/stuck alerts) queued by the keeper.
         The keeper runs under the system python (no lark_oapi), so it can only
-        write the outbox; this server (uvx env, has lark) does the actual send."""
+        write the outbox; this server (uvx env, has lark) does the actual send.
+
+        Delivery policy (mcp_channel/digest_tracker.py): a `progress` (working-
+        status digest) EDITS the previous digest in place while no new user
+        message / reply / stuck alert has landed since; otherwise it (and every
+        `stuck` alert) is a fresh message."""
         await initialized.wait()
         while True:
             try:
                 for msg in bridgestate.drain_outbox():
+                    chat_id = msg["chat_id"]
+                    text = msg["text"]
+                    kind = msg.get("kind", "progress")
+                    action = "sent"
                     try:
-                        mid = await anyio.to_thread.run_sync(
-                            api.send_text, msg["chat_id"], msg["text"])
-                        ok = mid is not None
+                        if kind == "stuck":
+                            # A stuck alert is its own message; the next progress
+                            # digest must be fresh too.
+                            _DIGESTS.on_stuck(chat_id)
+                            mid = await anyio.to_thread.run_sync(
+                                api.send_text, chat_id, text)
+                            ok = mid is not None
+                        else:
+                            decision, target = _DIGESTS.plan(chat_id)
+                            if decision == "update" and target:
+                                ok = await anyio.to_thread.run_sync(
+                                    api.update_text, target, text)
+                                if ok:
+                                    action = "updated"
+                                else:
+                                    # Edit failed (message recalled / too old /
+                                    # transient) -> fall back to a new message and
+                                    # track that one instead.
+                                    _DIGESTS.drop(chat_id)
+                                    mid = await anyio.to_thread.run_sync(
+                                        api.send_text, chat_id, text)
+                                    ok = mid is not None
+                                    if ok:
+                                        _DIGESTS.remember(chat_id, mid)
+                            else:
+                                mid = await anyio.to_thread.run_sync(
+                                    api.send_text, chat_id, text)
+                                ok = mid is not None
+                                if ok:
+                                    _DIGESTS.remember(chat_id, mid)
                     except Exception as e:
                         ok = False
+                        action = "failed"
                         print(f"[outbox] send failed: {e}", file=sys.stderr)
-                    print(f"[outbox] {msg['chat_id']} -> {'sent' if ok else 'failed'}: "
-                          f"{msg['text'][:50]!r}", file=sys.stderr)
+                    print(f"[outbox] {chat_id} {kind} -> {action}: "
+                          f"{text[:50]!r}", file=sys.stderr)
             except Exception as e:
                 print(f"[outbox] drain error: {e}", file=sys.stderr)
             await anyio.sleep(2.0)

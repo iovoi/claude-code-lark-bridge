@@ -1,8 +1,8 @@
 ---
-description: Show whether the Feishu bridge is up, plus recent channel log lines.
+description: Show whether the Feishu bridge is running (pid).
 ---
-Run the Feishu bridge launcher and report its output verbatim:
+Run the bridge status command and report its output verbatim:
 
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && .venv/bin/python -m mcp_channel.launcher status
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && .venv/bin/feishu-bridge status
 ```

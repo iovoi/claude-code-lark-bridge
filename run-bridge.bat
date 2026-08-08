@@ -1,6 +1,7 @@
 @echo off
-REM Run the Feishu bridge (installed by install.py). Launches a detached headless session.
+REM Run the Feishu bridge (installed by install.py). Starts a detached background process
+REM (no PTY, no tmux) via the `feishu-bridge` CLI.
 set REPO=%USERPROFILE%\.chat_bridge\claude-code-lark-bridge
-set PY=%USERPROFILE%\.chat_bridge\venv\Scripts\python.exe
+set BIN=%USERPROFILE%\.chat_bridge\venv\Scripts\feishu-bridge.exe
 cd /d "%REPO%" 2>nul || (echo Bridge not installed. Run install.bat first. & exit /b 1)
-"%PY%" -m mcp_channel.launcher up %*
+"%BIN%" up %*

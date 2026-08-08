@@ -1,23 +1,25 @@
-"""Feishu/Lark websocket long-connection receiver (+ stale-message guard).
+"""Feishu/Lark websocket long-connection receiver.
 
-`start_ws(on_message)` runs `lark.ws.Client` in a daemon thread; each inbound
-P2ImMessageReceiveV1 event is flattened to a dict and handed to `on_message`,
-which (in server.py) forwards it onto the MCP loop's asyncio.Queue via
-`loop.call_soon_threadsafe`. Stale messages (sent before this process started)
-are dropped by the caller using `is_stale`.
+Extended from the old mcp_channel/feishu_ingest.py: now also (a) captures ``thread_id``
+for topic-group scope isolation and (b) registers a ``card.action.trigger`` handler so
+interactive-card button taps (approval Approve/Deny/Deny+stop, streaming-card Stop)
+reach the runtime via ``on_card_action``.
 
-Imports: lark_oapi is imported INSIDE the thread's run(), not at module top,
-so importing this module (and thus starting the MCP server) is fast — the slow
-lark import happens in the background thread, after the MCP `initialize`
-handshake has already completed.
+``start_ws(on_message, on_card_action)`` runs ``lark.ws.Client`` in a daemon thread.
+lark_oapi is imported INSIDE the thread so importing this module is fast.
 """
 from __future__ import annotations
+
 import json
 import sys
 import threading
 from datetime import datetime, timezone
+from typing import Callable, Optional
 
 import feishu_api as api  # APP_ID/APP_SECRET only; does NOT import lark at top
+
+OnMessage = Callable[[dict], None]
+OnCardAction = Callable[[dict], None]
 
 
 def _now_iso() -> str:
@@ -25,8 +27,7 @@ def _now_iso() -> str:
 
 
 def is_stale(create_time, boot_time: float) -> bool:
-    """True if the message was created before boot (sent while the channel was down).
-    Feishu's create_time may be seconds or milliseconds — normalize both."""
+    """True if the message was created before boot. Feishu's create_time may be s or ms."""
     ct = create_time
     if not ct:
         return False
@@ -40,18 +41,7 @@ def is_stale(create_time, boot_time: float) -> bool:
 
 
 def extract_text(message_type: str, content: dict) -> str:
-    """Best-effort PLAIN TEXT from a Feishu/Lark message body.
-
-    Handles:
-      * "text"  -> the text field
-      * "post"  -> rich-text: {<locale>: {title, content: [[{tag,...}, ...], ...]}}
-                   flattened to title + one line per content row, with text/a/
-                   mention/at node text joined. Image/media nodes contribute no
-                   text (an image-only post returns "" so the caller can say so).
-
-    Other types (image, file, interactive card, ...) return "" — the caller falls
-    back to a "[<type> message]" placeholder. Pure and dependency-free so it is
-    unit-testable without lark_oapi."""
+    """Best-effort plain text from a Feishu message body (text / post). Dependency-free."""
     if not isinstance(content, dict):
         return ""
     if message_type == "text":
@@ -61,13 +51,10 @@ def extract_text(message_type: str, content: dict) -> str:
     return ""
 
 
-# Preferred locale keys in order; Feishu wraps the body as {"zh_cn": {...}} etc.
 _POST_LOCALES = ("zh_cn", "en_us", "ja_jp", "ko_kr", "en", "zh")
 
 
 def _post_locale(content: dict) -> dict:
-    """Return the locale body dict of a post message, tolerating a missing locale
-    wrapper (some clients send {title, content} directly)."""
     for k in _POST_LOCALES:
         v = content.get(k)
         if isinstance(v, dict):
@@ -81,8 +68,6 @@ def _post_locale(content: dict) -> dict:
 
 
 def _node_text(node: dict) -> str:
-    """Plain text for one rich-text node. Text/a carry .text; at/mention carry a
-    user name; image/media/sticker carry none (they're not text)."""
     if not isinstance(node, dict):
         return ""
     tag = node.get("tag")
@@ -90,7 +75,6 @@ def _node_text(node: dict) -> str:
         return str(node.get("text", "") or "")
     if tag in ("at", "mention"):
         return str(node.get("name") or node.get("text") or "")
-    # image / media / sticker / unknown: no extractable text
     return ""
 
 
@@ -113,19 +97,24 @@ def _post_to_text(content: dict) -> str:
     return "\n".join(parts).strip()
 
 
-def start_ws(on_message) -> threading.Thread:
-    """Start the Feishu websocket client in a daemon thread; return the thread.
+def start_ws(
+    on_message: OnMessage,
+    on_card_action: Optional[OnCardAction] = None,
+) -> threading.Thread:
+    """Start the Feishu websocket client in a daemon thread; return the thread."""
+    if feishu_api.cred("FEISHU_DISABLE_WS") == "1":
+        print("[ws] FEISHU_DISABLE_WS=1 — websocket not started", file=sys.stderr)
+        t = threading.Thread(target=lambda: None, daemon=True, name="feishu-ws-disabled")
+        t.start()
+        return t
 
-    Returns immediately — the lark_oapi import + websocket connect happen inside
-    the thread, so the caller (the MCP event loop) is never blocked by them."""
     def run() -> None:
-        # Import lark INSIDE the thread so it doesn't block the MCP server startup.
-        import lark_oapi as lark  # noqa: F401
-        from lark_oapi.api.im.v1 import P2ImMessageReceiveV1  # noqa: F401 (type hint for handler)
-        api.route_lark_logs_to_stderr()  # noqa: F401 (type hint for handler)
+        import lark_oapi as lark
+        from lark_oapi.api.im.v1 import P2ImMessageReceiveV1  # noqa: F401
+
+        api.route_lark_logs_to_stderr()
 
         def on_receive(data) -> None:
-            print(f"[ws] on_receive FIRED: type={type(data).__name__}", file=sys.stderr)
             try:
                 msg = data.event.message
                 sender = data.event.sender.sender_id.open_id
@@ -141,26 +130,53 @@ def start_ws(on_message) -> threading.Thread:
                     "message_type": msg.message_type,
                     "open_id": sender,
                     "text": text,
+                    "thread_id": getattr(msg, "thread_id", None),
                     "create_time": getattr(msg, "create_time", None),
                     "ts": _now_iso(),
                 }
                 on_message(evt)
             except Exception as e:
-                print(f"[ws] handler error: {e}", file=sys.stderr)
+                print(f"[ws] message handler error: {e}", file=sys.stderr)
+
+        def on_card(data) -> None:
+            try:
+                ev = data.event
+                action = getattr(ev, "action", None)
+                value = getattr(action, "value", None) if action else None
+                # value is a JSON string or dict depending on SDK version
+                if isinstance(value, str):
+                    try:
+                        value = json.loads(value)
+                    except Exception:
+                        pass
+                context = getattr(ev, "context", None)
+                open_id = getattr(getattr(context, "open_id", None), "open_id", None) if context else None
+                message_id = getattr(context, "open_message_id", None) if context else None
+                on_card_action({
+                    "value": value or {},
+                    "message_id": message_id,
+                    "open_id": open_id,
+                    "ts": _now_iso(),
+                })  # type: ignore[misc]
+            except Exception as e:
+                print(f"[ws] card-action handler error: {e}", file=sys.stderr)
 
         try:
-            dispatcher = (
-                lark.EventDispatcherHandler.builder("", "")
-                .register_p2_im_message_receive_v1(on_receive)
-                .build()
-            )
+            builder = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(on_receive)
+            if on_card_action is not None:
+                try:
+                    builder = builder.register_p2_card_action_trigger_v1(on_card)
+                except AttributeError:
+                    print("[ws] card.action.trigger registration unavailable in this lark_oapi",
+                          file=sys.stderr)
+            dispatcher = builder.build()
             client = lark.ws.Client(
                 api.APP_ID, api.APP_SECRET,
                 event_handler=dispatcher,
                 log_level=lark.LogLevel.INFO,
             )
             print("[ws] feishu websocket starting…", file=sys.stderr)
-            client.start()  # blocks; lark reconnects internally on disconnect
+            client.start()  # blocks; lark reconnects internally
         except Exception as e:
             print(f"[ws] thread exited: {e}", file=sys.stderr)
 

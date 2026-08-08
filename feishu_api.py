@@ -1,22 +1,16 @@
 #!/usr/bin/env python3
 """
-Shared helpers for the Feishu/Lark MCP channel (mcp_channel/).
+Shared Feishu/Lark REST client + helpers for the bridge (`bridge/`).
 
-Provides the Feishu REST client + the send/react actions the channel's `reply` /
-`react` tools call, plus .env loading. The inbound websocket ingest lives in
-mcp_channel/feishu_ingest.py (it uses lark.ws.Client directly).
+Provides the REST `lark.Client` (cached) and the send / update / reaction actions
+the bridge uses (text + interactive cards + emoji reactions), plus .env loading.
+The inbound websocket long-connection ingest lives in `bridge/ingest.py` and builds
+its own `lark.ws.Client` — do NOT route the websocket client through this module.
 
-NOTE on clients:
-  - client() here returns the REST `lark.Client` used for sending messages and
-    reactions.
-  - mcp_channel/feishu_ingest.py separately builds a `lark.ws.Client` for the
-    WebSocket long-connection ingest. Do NOT route the websocket client through
-    this module.
-
-NOTE on imports: `lark_oapi` is imported LAZILY (inside the functions that use
-it), not at module top. Importing lark_oapi is slow (~100s on a WSL /mnt/c drvfs),
-and deferring it lets the MCP server answer `initialize` immediately and import
-lark in the background. The first send/react call pays the import cost once.
+NOTE on imports: `lark_oapi` is imported LAZILY (inside the functions that use it),
+not at module top. Importing lark_oapi is slow (~100s on a WSL /mnt/c drvfs), and
+deferring it lets the bridge start fast and import lark in the background. The first
+send/react call pays the import cost once.
 """
 
 import json
@@ -170,6 +164,56 @@ def update_text(message_id: str, text: str) -> bool:
         .request_body(
             UpdateMessageRequestBody.builder()
             .content(json.dumps({"text": text}, ensure_ascii=False))
+            .build()
+        )
+        .build()
+    )
+    try:
+        resp = client().im.v1.message.update(req)
+    except Exception:
+        return False
+    return resp.success()
+
+
+def send_card(chat_id: str, card: dict):
+    """Send an interactive card to chat_id. Returns message_id or None (fail-soft).
+
+    `card` is the Feishu interactive-card JSON object (v1 schema); it is serialized as
+    msg_type "interactive". Used by the bridge for streaming cards and approval cards."""
+    from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+    req = (
+        CreateMessageRequest.builder()
+        .receive_id_type("chat_id")
+        .request_body(
+            CreateMessageRequestBody.builder()
+            .receive_id(chat_id)
+            .msg_type("interactive")
+            .content(json.dumps(card, ensure_ascii=False))
+            .build()
+        )
+        .build()
+    )
+    try:
+        resp = client().im.v1.message.create(req)
+    except Exception:
+        return None
+    if resp.success():
+        return getattr(getattr(resp, "data", None), "message_id", None)
+    return None
+
+
+def update_card(message_id: str, card: dict) -> bool:
+    """Edit an interactive card the bot previously sent (PUT im/v1/messages/:id).
+
+    Re-renders the whole card from `card`. Fail-soft: returns False on any error so
+    callers can skip a failed throttled update without crashing the turn."""
+    from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
+    req = (
+        UpdateMessageRequest.builder()
+        .message_id(message_id)
+        .request_body(
+            UpdateMessageRequestBody.builder()
+            .content(json.dumps(card, ensure_ascii=False))
             .build()
         )
         .build()

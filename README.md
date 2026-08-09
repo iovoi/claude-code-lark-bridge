@@ -110,5 +110,8 @@ anything beyond personal testing.
 
 - Text and rich-text (`post`) inbound; image/file attachments are not parsed.
 - Topic-group threads are folded into scope identity (`chat_id:thread_id`) but render in the chat.
-- The hand-rolled control protocol is validated against a stub; the **live smoke test**
-  against real `claude` is the remaining acceptance item (see `docs/pipe-bridge/` §3 AC #1).
+- **Tool approvals via reply:** replying `approve` / `deny` / `stop` (or y/n/1/2/3) in chat resolves a
+  pending approval — the default reliable path, no console setup. The on-card **buttons** additionally
+  require subscribing the Feishu app to the `card.action.trigger` event in the Developer Console
+  (Events & Callbacks); without that subscription, tapping a button does nothing useful.
+- Live-validated against real `claude` (print/streaming + hand-rolled control protocol) end-to-end.

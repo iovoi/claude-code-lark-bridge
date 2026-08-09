@@ -108,7 +108,7 @@
   - Depends on: T7.1, T5.3
 
 ## Phase 8 — Verify & wrap up
-- [ ] **T8.1** Run every acceptance criterion from PRD §3 (1–12); record results in `log.md`.
+- [x] **T8.1** Run every acceptance criterion from PRD §3 (1–12); record results in `log.md`.
   - Acceptance: all 12 pass; manual ones (1, 7 live, smoke) executed in the tmux pane with results noted.
   - Depends on: all above
 - [ ] **T8.2** Update `prd.md` Status → Complete; write final `log.md` summary; commit on `feat/pipe-bridge` and open PR.

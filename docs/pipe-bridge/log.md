@@ -18,6 +18,23 @@ Copy the template below, fill it in, and insert it at the top of "Entries".
 
 ## Entries
 
+### 2026-08-09 — LIVE SMOKE PASSED ✅ (T8.1 complete)
+- **Task:** T8.1
+- **What happened:** Full end-to-end against the user's real Feishu app + real `claude` (glm-5.2).
+  User DM'd *"Use the Write tool to create /tmp/bridge_test.txt containing the word hello."* Observed
+  (and confirmed by the user): **OnIt reaction** → **working/streaming card** → **approval card**
+  (3 buttons) on the Write tool → user **replied `approve`** in chat → **"(approval: allow)"** reply →
+  reaction flipped to **Done** → **`/tmp/bridge_test.txt` created with content `hello`**. The turn log
+  confirmed: `start → tool_use Write{file_path,content} → approval requested → done (tools=['Write'])`.
+  Every acceptance criterion from PRD §3 is met end-to-end (emoji cycle, streaming card, approval flow,
+  memory/CLAUDE.md context, /stop + single-flight via unit tests, no-PTY cross-platform supervisor).
+- **Discovery / blocker:** The on-card **buttons** require the Feishu app to subscribe to the
+  `card.action.trigger` event in the Developer Console; without it, tapping a button redirects to a
+  "create app" page. The **reply-based approval fallback** (`approve`/`deny`/`stop`) works over the
+  message channel with no console change and is the default reliable path. (Documented in README.)
+- **Resolution / workaround:** Reply-based approval is the working path; button support = console config.
+- **PRD impact:** T8.1 done; PRD §3 acceptance met. Remaining: T8.2 (open PR).
+
 ### 2026-08-09 — Live Feishu smoke: OnIt + streaming card + approval card confirmed; card-action delivery needs console subscription (reply-fallback added)
 - **Task:** T8.1 (live smoke, in progress)
 - **What happened:** Bridge is LIVE against the user's Feishu app (websocket `connected to

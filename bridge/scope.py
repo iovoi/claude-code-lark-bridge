@@ -103,6 +103,7 @@ class ScopeRunner:
         message_id = evt.get("message_id", "")
         onit = self.lark.stamp_onit(message_id)
         prompt = (evt.get("text") or "").strip()
+        print(f"[turn {self.scope}] start: {prompt[:150]!r}", file=sys.stderr, flush=True)
 
         self._state = CardState(prompt=prompt, phase="working", status="Starting…", scope=self.scope)
         self._card = StreamingCard(self.lark, evt.get("chat_id", self.chat_id), self.scope, self.cfg.card_throttle_ms)
@@ -163,6 +164,8 @@ class ScopeRunner:
             if event.name not in st.tools:
                 st.tools.append(event.name)
             st.status = f"Using {event.name}"
+            print(f"[turn {self.scope}] tool_use {event.name}: "
+                  + repr(event.input)[:200], file=sys.stderr, flush=True)
         elif isinstance(event, ToolResultEvent):
             st.status = "Continuing…" if not event.is_error else "Tool error"
         elif isinstance(event, UsageEvent):
@@ -170,12 +173,15 @@ class ScopeRunner:
         elif isinstance(event, ErrorEvent):
             st.phase = "error"
             st.status = event.message
+            print(f"[turn {self.scope}] ERROR: {event.message}", file=sys.stderr, flush=True)
         elif isinstance(event, DoneEvent):
-            pass
+            print(f"[turn {self.scope}] done; tools={st.tools}; "
+                  f"answer_len={len(st.answer)}", file=sys.stderr, flush=True)
         await self._card.update(st)
 
     async def _approval_cb(self, tool: str, inp: dict) -> str:
         # Pause the turn on an approval card; resolved by a card-action tap or timeout.
+        print(f"[turn {self.scope}] approval requested: {tool}", file=sys.stderr, flush=True)
         if self._state is not None:
             self._state.status = f"⏸ Waiting for approval: {tool}"
             await self._card.update(self._state) if self._card else None

@@ -1,0 +1,124 @@
+"""Tool-approval flow: post a 3-button Feishu card, await the user's tap (or timeout).
+
+When Claude asks to use a tool off the allowlist, :meth:`ApprovalManager.request` posts
+an approval card and blocks (awaiting a Future) until the runtime resolves it via
+:meth:`resolve` (a card-action button tap) or the approval timeout auto-denies.
+
+Verdicts: ``"allow"`` / ``"deny"`` / ``"deny_stop"`` (deny + interrupt the turn).
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+import uuid
+from dataclasses import dataclass
+from typing import Optional
+
+from .cards import render_approval_card_resolved, render_streaming_card
+from .config import BridgeConfig
+from .lark import Lark
+
+
+@dataclass
+class _Pending:
+    future: asyncio.Future
+    chat_id: str
+    scope: str
+    tool: str
+    summary: str = ""
+    card_message_id: Optional[str] = None
+
+
+def _summary(tool: str, inp: dict) -> str:
+    """One-line, redaction-friendly summary of what the tool wants to do."""
+    if tool in ("Bash", "BashOutput", "KillShell"):
+        return str(inp.get("command") or inp)
+    if tool in ("Edit", "Write", "NotebookEdit", "MultiEdit"):
+        return str(inp.get("file_path") or inp)
+    if tool == "WebFetch":
+        return str(inp.get("url") or inp)
+    if tool in ("WebSearch",):
+        return str(inp.get("query") or inp)
+    s = repr(inp)
+    return s[:500]
+
+
+class ApprovalManager:
+    def __init__(self, lark: Lark, cfg: BridgeConfig) -> None:
+        self._lark = lark
+        self._cfg = cfg
+        self._pending: dict[str, _Pending] = {}
+
+    @property
+    def has_pending(self) -> bool:
+        return bool(self._pending)
+
+    def pending_for_scope(self, scope: str) -> Optional[_Pending]:
+        for p in self._pending.values():
+            if p.scope == scope:
+                return p
+        return None
+
+    async def request(self, *, chat_id: str, scope: str, tool: str, inp: dict, context: str) -> str:
+        """Post the card and block until resolved/timeout. Returns a verdict string."""
+        token = uuid.uuid4().hex
+        loop = asyncio.get_event_loop()
+        fut: asyncio.Future = loop.create_future()
+        summary = _summary(tool, inp)
+        card_msg = self._lark.send_approval_card(
+            chat_id, tool=tool, summary=summary, context=context, token=token, scope=scope
+        )
+        pending = _Pending(future=fut, chat_id=chat_id, scope=scope, tool=tool,
+                           summary=summary, card_message_id=card_msg)
+        self._pending[token] = pending
+        try:
+            return await asyncio.wait_for(fut, timeout=self._cfg.approval_timeout)
+        except asyncio.TimeoutError:
+            print(f"[approval {scope}] TIMED OUT after {self._cfg.approval_timeout}s (auto-deny)",
+                  file=sys.stderr, flush=True)
+            self._mark_card(pending, "deny", title_override="⏱ Timed out (auto-denied)")
+            return "deny"
+        finally:
+            self._pending.pop(token, None)
+
+    def resolve(self, token: str, verdict: str) -> bool:
+        """Resolve a pending approval from a card-action tap. Returns True if it matched."""
+        pending = self._pending.get(token)
+        return self._apply(pending, verdict)
+
+    def resolve_for_scope(self, scope: str, verdict: str) -> bool:
+        """Resolve the pending approval for a scope via a reply message (fallback when
+        card-action buttons aren't delivered). Returns True if a pending approval matched."""
+        for token, pending in self._pending.items():
+            if pending.scope == scope:
+                return self._apply(pending, verdict)
+        return False
+
+    def _apply(self, pending: "_Pending | None", verdict: str) -> bool:
+        if pending is None or pending.future.done():
+            return False
+        # Normalize vocabulary: card buttons use "approve" (and reply maps to "allow").
+        v = "allow" if verdict == "approve" else verdict
+        v = v if v in ("allow", "deny", "deny_stop", "approve_all") else "deny"
+        print(f"[approval {pending.scope}] resolved -> {v} (tool={pending.tool})",
+              file=sys.stderr, flush=True)
+        self._mark_card(pending, v)
+        pending.future.set_result(v)
+        return True
+
+    def _mark_card(self, pending: _Pending, verdict: str, title_override: str = "") -> None:
+        """Re-render the approval card to its resolved state: header reflects the choice and
+        only the clicked button is retained (the others removed)."""
+        if not pending.card_message_id:
+            return
+        card = render_approval_card_resolved(
+            tool=pending.tool, chosen=verdict, summary=pending.summary, context="",
+        )
+        if title_override:
+            card["header"]["title"]["content"] = title_override
+            card["header"]["template"] = "grey"
+        try:
+            self._lark.update_card(pending.card_message_id, card)
+        except Exception:
+            pass

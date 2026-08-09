@@ -1,8 +1,8 @@
 {
   "name": "feishu",
-  "description": "Feishu/Lark channel for Claude Code — pushes inbound Feishu messages into a running Claude session and exposes reply/react tools. Configure creds/allowlist via the prompted values (or .env in dev mode).",
-  "version": "0.2.0",
-  "keywords": ["feishu", "lark", "messaging", "channel", "mcp"],
+  "description": "Feishu/Lark bridge for Claude Code — drives Claude in non-interactive streaming mode and relays chat via the bridge (OnIt->Done emoji, streaming cards, tool-approval cards). Configure creds/allowlist via the prompted values (or .env in dev mode).",
+  "version": "0.3.0",
+  "keywords": ["feishu", "lark", "messaging", "bridge", "claude-code"],
   "userConfig": {
     "FEISHU_APP_ID": {
       "type": "string",

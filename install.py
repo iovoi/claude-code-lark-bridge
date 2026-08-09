@@ -5,10 +5,13 @@ Run via the thin wrappers: `./install.sh` (POSIX) or `install.bat` (Windows),
 which just call `python3 install.py`.
 
 Layout created under ~/.chat_bridge/:
-  ~/.chat_bridge/venv/                 # venv: provides launcher python + uvx (uv pip-installed)
+  ~/.chat_bridge/venv/                 # venv: provides the `feishu-bridge` CLI (uv pip-installed)
   ~/.chat_bridge/<repo>/               # the bridge code (git clone, or curl tarball if no git)
-  ~/.chat_bridge/<repo>/.mcp.json      # rewritten to point at the venv's uvx
+  ~/.chat_bridge/<repo>/.env           # Feishu app credentials (written interactively)
 The run skill is installed to ~/.claude/skills/feishu-bridge/.
+
+The bridge drives Claude Code in non-interactive streaming mode — no PTY, no tmux,
+identical on Windows / Mac / Linux.
 """
 from __future__ import annotations
 import os
@@ -43,7 +46,7 @@ def _venv_bin(tool: str) -> str:
     return str(VENV / sub / f"{tool}{ext}")
 
 
-_TOTAL_STEPS = 6  # preflight, fetch_repo, make_venv, configure_mcp, credentials, skill
+_TOTAL_STEPS = 5  # preflight, fetch_repo, make_venv, credentials, skill
 _step_n = 0
 
 
@@ -158,23 +161,11 @@ def _bootstrap_python() -> str | None:
     return None
 
 
-def _warn_native_windows() -> None:
-    """Detect non-WSL native Windows and emit a prominent warning. Native Windows
-    uses the pywinpty PTY path + a Windows asyncio stdio transport that are less
-    battle-tested than the POSIX/WSL2 path; WSL2 (run install.sh inside Ubuntu) is
-    the fully-verified Windows route. We warn, not gate, because the native path is
-    being actively fixed."""
-    if os.name != "nt":
-        return
-    print(
-        "\n[install] *** NATIVE WINDOWS DETECTED ***\n"
-        "[install] The native-Windows runtime (pywinpty PTY + Windows asyncio stdio)\n"
-        "[install] is functional but less verified than the POSIX path. For the most\n"
-        "[install] reliable experience on a Windows machine, install under WSL2:\n"
-        "[install]     run install.sh inside an Ubuntu shell.\n"
-        "[install] Proceeding with the native install anyway.\n",
-        file=sys.stderr, flush=True,
-    )
+def _platform_note() -> None:
+    """The bridge is uniformly cross-platform (streaming print/pipe mode — no PTY/tmux),
+    so there is no longer a native-Windows caveat. Print a short confirmation."""
+    print(f"[install] platform: {platform.system()} (streaming mode — no PTY/tmux needed)",
+          flush=True)
 
 
 def preflight() -> None:
@@ -222,36 +213,23 @@ def make_venv() -> None:
     else:
         _step("uv already in venv")
     uv = _venv_bin("uv")
-    # The launcher/doctor/keeper (run-bridge.* → python -m mcp_channel.launcher) import
-    # feishu_api (→ lark-oapi), mcp, and (Windows) pywinpty FROM THIS VENV. The MCP server
-    # context (A) gets its deps via uvx at runtime, but the management CLI context (B)
-    # does not — so install the package + platform extra into the venv too.
-    extra = "[windows]" if os.name == "nt" else ""
-    target = f"{REPO}{extra}"
+    # The bridge CLI (run-bridge.* → feishu-bridge) imports feishu_api (→ lark-oapi) and
+    # the `bridge` package FROM THIS VENV. No mcp / pywinpty anymore.
+    target = str(REPO)
     # Checkpoint: if the package already imports in the venv, a previous run finished
     # this step — skip the (slow) reinstall. Lets an interrupted install resume cheaply.
-    if _venv_has_pkg("feishu_api") and _venv_has_pkg("mcp_channel") and \
-            (os.name != "nt" or _venv_has_pkg("winpty")):
+    if _venv_has_pkg("bridge") and _venv_has_pkg("feishu_api"):
         _step("bridge package + deps already present; skipping install.")
     else:
-        suffix = "" if not extra else " (extra: windows)"
-        _step(f"installing bridge package + deps via uv (faster than pip){suffix} …")
+        _step("installing bridge package + deps via uv (faster than pip) …")
         # uv pip resolves + installs in seconds vs pip's minutes; -e editable so
         # `git pull` of the repo is reflected without reinstall. Fall back to pip.
-        # On native Windows, uv (>=0.5) launched from a fresh install.py won't see the
-        # just-created venv (no VIRTUAL_ENV, cwd is not the venv parent) and aborts with
-        # "No virtual environment found". Set VIRTUAL_ENV so uv installs into our venv.
-        # (POSIX already finds it; left untouched to preserve the WSL path.)
-        install_env = dict(os.environ)
-        if os.name == "nt":
-            install_env["VIRTUAL_ENV"] = str(VENV)
-        rc = subprocess.run([uv, "pip", "install", "-e", target], check=False,
-                            env=install_env).returncode
+        rc = subprocess.run([uv, "pip", "install", "-e", target], check=False).returncode
         if rc != 0:
             # editable may fail on some setups; fall back to a plain path install.
-            subprocess.run([uv, "pip", "install", target], check=True, env=install_env)
+            subprocess.run([uv, "pip", "install", target], check=True)
         _done("bridge package + deps installed")
-    _done(f"venv ready; uvx at {_venv_bin('uvx')}")
+    _done(f"venv ready; feishu-bridge at {_venv_bin('feishu-bridge')}")
 
 
 def fetch_repo() -> None:
@@ -278,29 +256,6 @@ def fetch_repo() -> None:
             shutil.move(str(extracted), str(REPO))
         _done("repo downloaded + extracted")
     _step(f"repo ready at {REPO}")
-
-
-def configure_mcp() -> None:
-    """Rewrite .mcp.json to point the feishu MCP server at the venv.
-
-    Native Windows uses the venv's ``python -m mcp_channel`` directly: the
-    installer otherwise writes ``uvx --extra windows feishu-channel``, but uv
-    >=0.7's ``uvx`` has no ``--extra`` flag, so uvx errors out and the channel
-    server never starts. POSIX/WSL keeps the ``uvx --from`` form (no extra
-    needed there)."""
-    import json
-    if os.name == "nt":
-        py = _venv_bin("python")
-        mcp = {"mcpServers": {"feishu": {"command": py, "args": ["-m", "mcp_channel"]}}}
-        (REPO / ".mcp.json").write_text(json.dumps(mcp, indent=2), encoding="utf-8")
-        _step(f".mcp.json -> venv python ({py}) -m mcp_channel (native Windows)")
-    else:
-        uvx = _venv_bin("uvx")
-        args = ["--from", str(REPO), "feishu-channel"]
-        mcp = {"mcpServers": {"feishu": {"command": uvx, "args": args}}}
-        (REPO / ".mcp.json").write_text(json.dumps(mcp, indent=2), encoding="utf-8")
-        _step(f".mcp.json -> venv uvx ({uvx}) + repo ({REPO})")
-    _done(".mcp.json written")
 
 
 def install_skill() -> None:
@@ -417,7 +372,7 @@ def collect_credentials() -> None:
 def main() -> None:
     print(f"\n[install] Feishu/Lark <-> Claude Code bridge  (ref={REPO_REF})")
     print(f"[install] target: {CHAT_BRIDGE}\n")
-    _warn_native_windows()
+    _platform_note()
 
     _phase("Preflight — Python + Claude Code")
     preflight()
@@ -428,9 +383,6 @@ def main() -> None:
     _phase("Create venv + install dependencies")
     make_venv()
 
-    _phase("Configure .mcp.json")
-    configure_mcp()
-
     _phase("Feishu app credentials")
     collect_credentials()
 
@@ -440,12 +392,12 @@ def main() -> None:
     rb = "run-bridge.sh" if os.name != "nt" else "run-bridge.bat"
     print("\n[install] ===========================================")
     print("[install] DONE.\n"
-          f"  Repo:    {REPO}\n"
-          f"  Venv:    {VENV}\n"
-          f"  uvx:     {_venv_bin('uvx')}\n"
-          f"  Skill:   {SKILL_DST}\n"
-          f"  Creds:   {REPO}/.env\n"
-          f"  Run via: {REPO}/{rb}   (or tell your agent: 'run the feishu bridge')")
+          f"  Repo:          {REPO}\n"
+          f"  Venv:          {VENV}\n"
+          f"  CLI:           {_venv_bin('feishu-bridge')}\n"
+          f"  Skill:         {SKILL_DST}\n"
+          f"  Creds:         {REPO}/.env\n"
+          f"  Start with:    {REPO}/{rb}   (or: feishu-bridge up)")
 
 
 if __name__ == "__main__":

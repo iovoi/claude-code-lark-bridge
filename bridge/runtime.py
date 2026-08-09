@@ -25,6 +25,8 @@ def _verdict_from_text(text: str) -> str | None:
     t = (text or "").strip().lower()
     if t in ("approve", "yes", "y", "ok", "1", "允许", "同意"):
         return "allow"
+    if t in ("all", "approve all", "approveall", "approve-all"):
+        return "approve_all"
     if t in ("stop", "deny_stop", "abort", "cancel", "3", "取消", "停止"):
         return "deny_stop"
     if t in ("deny", "no", "n", "2", "拒绝"):
@@ -105,7 +107,7 @@ class Runtime:
             runner = self.scopes.get(scope) if scope else None
             if runner is not None:
                 await runner.request_stop()
-        elif verb in ("approve", "deny", "deny_stop") and token:
+        elif verb in ("approve", "deny", "deny_stop", "approve_all") and token:
             self.approvals.resolve(token, verb)
 
     @staticmethod

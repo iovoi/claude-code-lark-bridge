@@ -100,7 +100,7 @@ class ApprovalManager:
             return False
         # Normalize vocabulary: card buttons use "approve" (and reply maps to "allow").
         v = "allow" if verdict == "approve" else verdict
-        v = v if v in ("allow", "deny", "deny_stop") else "deny"
+        v = v if v in ("allow", "deny", "deny_stop", "approve_all") else "deny"
         print(f"[approval {pending.scope}] resolved -> {v} (tool={pending.tool})",
               file=sys.stderr, flush=True)
         self._mark_card(pending, v)

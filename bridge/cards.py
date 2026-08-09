@@ -108,6 +108,8 @@ def render_approval_card(*, tool: str, summary: str, context: str, token: str, s
         "actions": [
             {"tag": "button", "type": "primary", "text": _plain("✓ Approve"),
              "value": {"v": "approve", "t": token, "s": scope}},
+            {"tag": "button", "type": "primary", "text": _plain("✓ Approve all (turn)"),
+             "value": {"v": "approve_all", "t": token, "s": scope}},
             {"tag": "button", "type": "default", "text": _plain("✕ Deny"),
              "value": {"v": "deny", "t": token, "s": scope}},
             {"tag": "button", "type": "danger", "text": _plain("✕ Deny + stop"),
@@ -128,6 +130,7 @@ def render_approval_card_resolved(*, tool: str, chosen: str, summary: str, conte
     chosen is the internal verdict: 'allow' | 'deny' | 'deny_stop'."""
     info = {
         "allow": ("✓ Approved", "green", "Approve", "primary"),
+        "approve_all": ("✓ Approved (all this turn)", "green", "Approve all (turn)", "primary"),
         "deny": ("✕ Denied", "grey", "Deny", "default"),
         "deny_stop": ("✕ Denied + stopped", "grey", "Deny + stop", "danger"),
     }.get(chosen, ("Resolved", "grey", chosen, "default"))

@@ -121,6 +121,10 @@ class ClaudeAdapter:
             stderr_sink=stderr_sink,
         )
         self._started = False
+        # Per-turn "approve all" escalation: once the user picks "Approve all (turn)" on an
+        # approval card, subsequent can_use_tool prompts in THIS turn auto-allow (no card).
+        # Reset at the start of each turn.
+        self._approve_all = False
 
     @property
     def session_id(self) -> str | None:
@@ -139,6 +143,7 @@ class ClaudeAdapter:
             print(f"[claude] initialize error: {e!r} (continuing)", file=sys.stderr)
 
     async def run_turn(self, prompt: str, emit: Emit, on_frame: Any = None) -> dict[str, Any]:
+        self._approve_all = False  # per-turn: re-confirm approvals each turn
         await self._transport.send_user_turn(prompt)
         result_info: dict[str, Any] = {"session_id": self.session_id}
         async for frame in self._transport.events():
@@ -167,9 +172,15 @@ class ClaudeAdapter:
         tool = str(req.get("tool_name", ""))
         if tool in self._cfg.auto_approve_tools:
             return {"behavior": "allow"}
+        if self._approve_all:
+            # User escalated to "Approve all (turn)" earlier this turn.
+            return {"behavior": "allow"}
         if self._approval_callback is None:
             return {"behavior": "allow"}  # defensive; bypass mode won't prompt anyway
         verdict = await self._approval_callback(tool, req.get("input") or {})
+        if verdict == "approve_all":
+            self._approve_all = True  # auto-allow the rest of this turn
+            return {"behavior": "allow"}
         if verdict == "allow":
             return {"behavior": "allow"}
         if verdict == "deny_stop":

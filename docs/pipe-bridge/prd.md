@@ -76,8 +76,8 @@ Each is independently verifiable.
    tool denied + the whole turn is interrupted. The same verdicts work by **reply** in chat
    (`approve` / `all` / `deny` / `stop`, or y/n/1/2/3). On resolution the card re-renders to keep
    only the clicked button. Allowlisted tools run with no card.
-7. **Progress card + result:** if a turn runs longer than `FEISHU_CARD_DEFER_SEC` (default 60s),
-   a **"Working…" card** appears and updates every `FEISHU_CARD_INTERVAL_SEC` (default 30s) with a
+7. **Progress card + result:** if a turn runs longer than `FEISHU_CARD_DEFER_SEC` (default 10s),
+   a **"Working…" card** appears and updates every `FEISHU_CARD_INTERVAL_SEC` (default 10s) with a
    status/tool-log excerpt; turns finishing under the defer threshold send **no** card. The progress
    card is a **status indicator only**: on completion it flips to "Done" and the **actual result is
    delivered as a separate bot text message** (always). The card carries a **Stop** button while running.
@@ -288,7 +288,7 @@ ingest-post coverage into a new `tests/test_ingest.py`). **Modify:** `pyproject.
 - **New config keys** (`.env.example`): `FEISHU_WORKDIR` (default repo root), `FEISHU_MAX_CONCURRENT`
   (4), `FEISHU_STUCK_TIMEOUT` (180s), `FEISHU_APPROVAL_TIMEOUT` (300s),
   `FEISHU_AUTO_APPROVE_TOOLS` (`Read,Grep,Glob,WebSearch,WebFetch,TodoWrite`),
-  `FEISHU_CARD_THROTTLE_MS` (1500), `FEISHU_CARD_DEFER_SEC` (60), `FEISHU_CARD_INTERVAL_SEC` (30),
+  `FEISHU_CARD_THROTTLE_MS` (1500), `FEISHU_CARD_DEFER_SEC` (10), `FEISHU_CARD_INTERVAL_SEC` (10),
   `FEISHU_DEFAULT_PERMISSION_MODE` (`bypassPermissions` — used only
   when approval cards are unavailable).
 - **CLAUDE.md constraint:** long-running commands (running the bridge, real claude) go through the

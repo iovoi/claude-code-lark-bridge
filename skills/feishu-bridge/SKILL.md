@@ -46,7 +46,7 @@ message → swap to `Done`. Send `/stop` to cancel a turn. Conversation history 
    - native Windows: `{{REPO}}/run-bridge.bat`
    - or directly: `feishu-bridge up`  (local dev: `{{PY}} -m bridge` then `... up`, or `{{PY}} -m bridge run` for foreground/debug)
 5. **Report**: "The bridge is UP. DM your bot on Feishu/Lark — your messages reach Claude
-   here; Claude works on `FEISHU_WORKDIR`, shows a "Working…" card on long turns (>60s), asks for
+   here; Claude works on `FEISHU_WORKDIR`, shows a "Working…" card on long turns (>10s), asks for
    approval on risky tools, and replies as a bot message (OnIt→Done) in chat. Send `/stop` to cancel a
    turn." Logs: `~/.chat_bridge/bridge.log`.
 

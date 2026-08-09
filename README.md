@@ -15,7 +15,7 @@ Feishu/Lark ──ws──▶ bridge ──stdin(NDJSON user turns)──▶ cla
 - You DM the bot. The bridge stamps an **OnIt** reaction and sends your message to a
   long-lived `claude` subprocess (one per chat).
 - Claude works autonomously — searching, editing, running commands. If a turn runs longer
-  than 60s, a **"Working…" progress card** appears and updates every 30s (status + tool
+  than 10s, a **"Working…" progress card** appears and updates every 10s (status + tool
   log only). Short turns send no card.
 - When Claude wants a tool **not** on the auto-approve list, the bridge posts an
   **approval card** — **Approve / Approve all (turn) / Deny / Deny+stop** — and the turn

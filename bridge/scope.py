@@ -163,14 +163,16 @@ class ScopeRunner:
         cost = result.get("cost_usd")
         if isinstance(cost, (int, float)):
             self._state.usage = f"💰 ${cost:.4f}"
-        delivered = False
+        answer = (self._state.answer or "").strip()
         if self._card is not None and self._card.msg_id is not None:
-            # Progress card was shown -> try to update it to the final state (best-effort).
-            delivered = await self._card.finalize(self._state)
-        if not delivered:
-            # No card, or the card update failed -> deliver the answer as a text message.
-            answer = (self._state.answer or "").strip()
-            self.lark.send_text(self.chat_id, answer[:4000] if answer else "(done)")
+            # The progress card becomes a Done STATUS indicator only — the full result is
+            # delivered as a separate bot text message below, not crammed into the card.
+            if self._state.phase == "done":
+                self._state.answer = "✅ Done — result in the reply below."
+            await self._card.finalize(self._state)
+        # The actual result is ALWAYS sent as a normal bot message.
+        if answer:
+            self.lark.send_text(self.chat_id, answer[:4000])
         self.lark.swap_to_done(message_id, onit)
         if self._adapter is not None and self._adapter.session_id:
             session_store.set_session_id(self.scope, self._adapter.session_id, str(self.cfg.workdir))

@@ -22,7 +22,7 @@ The bridge drives Claude Code in **non-interactive streaming mode**
 process per chat. It hand-rolls the bidirectional control protocol so it can show
 **Lark approval cards** (Approve / Approve all (turn) / Deny / Deny+stop) when Claude wants a
 tool off the allowlist — tap a button or reply `approve`/`all`/`deny`/`stop` in chat; and a
-**deferred "Working…" progress card** (only after 60s, status-only). No PTY, no tmux, identical on
+**deferred "Working…" progress card** (only after 10s, status-only). No PTY, no tmux, identical on
 Windows / Mac / Linux. On a message: stamp `OnIt` → run the turn → post the answer as a bot
 message → swap to `Done`. Send `/stop` to cancel a turn. Conversation history + memory persist per chat
 (claude session, `--resume`d across restarts).

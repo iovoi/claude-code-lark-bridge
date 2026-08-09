@@ -113,8 +113,8 @@ Each is independently verifiable.
 ### 4.2 Outputs
 - **Reactions:** `OnIt` on the user's message at intake; removed + `Done` stamped at finalize.
 - **Progress card (status only):** deferred — created only if a turn runs past
-  `FEISHU_CARD_DEFER_SEC` (default 60s), then updated every `FEISHU_CARD_INTERVAL_SEC` (default
-  30s) with a compact status/tool-log excerpt. On completion it flips to a **"Done"** status
+  `FEISHU_CARD_DEFER_SEC` (default 10s), then updated every `FEISHU_CARD_INTERVAL_SEC` (default
+  10s) with a compact status/tool-log excerpt. On completion it flips to a **"Done"** status
   ("✅ Done — result in the reply below.") — it never holds the full answer. Interactive cards are
   updated via the Feishu **PATCH** endpoint (`message.patch`); PUT `/update` only supports text/post.
 - **Result message:** the actual answer is **always** delivered as a normal bot text message
@@ -338,6 +338,7 @@ ingest-post coverage into a new `tests/test_ingest.py`). **Modify:** `pyproject.
 | D13 | "Approve all (turn)" mode-change | (a) per-tool only (b) add an escalate button | (b) | tool-heavy tasks needed ~10 clicks; a per-turn escalation (resets each turn) cuts friction while preserving the per-turn safety re-confirm | 2026-08-10 |
 | D14 | Interactive card update API | PUT `/update` vs PATCH `/patch` | PATCH | Feishu's PUT update only supports text/post; interactive cards require the PATCH endpoint (body = content only, no msg_type). Found via live error 230001 | 2026-08-10 |
 | D15 | Approval resolution channels | (a) card buttons only (b) buttons + chat reply | (b) | card.action.trigger delivery depends on console subscription; replying approve/deny/stop works over the message channel with no setup — ship both | 2026-08-10 |
+| D16 | Card timing defaults | 60s defer / 30s interval vs 10s / 10s | 10s / 10s | user preference: card appears sooner + updates more frequently for better visibility on most tasks | 2026-08-10 |
 
 ## Appendix B — Glossary
 - **Scope:** the conversation unit the bridge tracks — `chat_id`, or `chat_id:thread_id` in topics.

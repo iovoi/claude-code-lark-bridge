@@ -2,7 +2,7 @@
 
 - **Status:** Complete
 - **Feature dir:** `docs/pipe-bridge/`
-- **Created:** 2026-08-08 · **Last updated:** 2026-08-08
+- **Created:** 2026-08-08 · **Last updated:** 2026-08-10
 
 ## 0. Resume protocol
 If you are a new agent: read this `prd.md`, then `tasks.md`, then `log.md`, then resume from the
@@ -68,14 +68,19 @@ Each is independently verifiable.
 5. **`/stop`:** sending `/stop` in the same chat during an active turn cancels it (graceful interrupt
    via the control protocol; SIGTERM+respawn fallback), and the bot posts `"(stopped)"` + `Done`.
 6. **Approval cards:** when Claude attempts a tool **not** on the auto-approve allowlist, the bot
-   posts an interactive card `Approve <tool>? <summary of input>` with **three** buttons —
-   **Approve** / **Deny** / **Deny + stop**. The turn pauses until a button is tapped (or it
-   auto-denies on timeout). Approve → Claude continues; Deny → the tool is denied and Claude
-   continues without it; **Deny + stop** → the tool is denied **and** the whole turn is interrupted.
-   Allowlisted tools run with no card.
-7. **Streaming card delivery:** at turn start the bot creates one interactive card; as Claude emits
-   assistant text / tool activity the card is updated incrementally (throttled); on completion the
-   card holds the final answer. The card also carries a **Stop** button.
+   posts an interactive card `Approve <tool>? <summary of input>` with **four** buttons —
+   **Approve** / **Approve all (turn)** / **Deny** / **Deny + stop**. The turn pauses until a
+   button is tapped or a reply is received (else auto-deny on timeout). **Approve** → Claude
+   continues; **Approve all (turn)** → allows this tool AND auto-allows every subsequent tool in
+   the same turn (resets next turn); **Deny** → tool denied, Claude continues; **Deny + stop** →
+   tool denied + the whole turn is interrupted. The same verdicts work by **reply** in chat
+   (`approve` / `all` / `deny` / `stop`, or y/n/1/2/3). On resolution the card re-renders to keep
+   only the clicked button. Allowlisted tools run with no card.
+7. **Progress card + result:** if a turn runs longer than `FEISHU_CARD_DEFER_SEC` (default 60s),
+   a **"Working…" card** appears and updates every `FEISHU_CARD_INTERVAL_SEC` (default 30s) with a
+   status/tool-log excerpt; turns finishing under the defer threshold send **no** card. The progress
+   card is a **status indicator only**: on completion it flips to "Done" and the **actual result is
+   delivered as a separate bot text message** (always). The card carries a **Stop** button while running.
 8. **Stuck watchdog:** a turn that emits no events for `FEISHU_STUCK_TIMEOUT` seconds (default 180)
    and has no pending approval is auto-interrupted and reported as `"(no activity — stopped)"`.
 9. **Memory loads:** a run in the configured workdir sees the project `CLAUDE.md` and auto-memory
@@ -107,14 +112,18 @@ Each is independently verifiable.
 
 ### 4.2 Outputs
 - **Reactions:** `OnIt` on the user's message at intake; removed + `Done` stamped at finalize.
-- **Streaming card:** one interactive card per turn, created at turn start, updated as events arrive,
-  holding the final answer at the end. Shows a **compact tool log** (one line per tool, e.g.
-  `tools: Read · Grep · Edit`) plus the assistant's partial answer as it streams — not a minimal
-  status, but not full thinking/noise either. Carries a **Stop** button while running.
-- **Approval card:** an interactive card with **three** buttons — **Approve** / **Deny** /
-  **Deny + stop** — raised when a non-allowlisted tool is requested; resolved by a button tap (or
-  auto-denied on timeout). Approve ⇒ allow; Deny ⇒ deny tool, continue; Deny + stop ⇒ deny tool +
-  interrupt the turn.
+- **Progress card (status only):** deferred — created only if a turn runs past
+  `FEISHU_CARD_DEFER_SEC` (default 60s), then updated every `FEISHU_CARD_INTERVAL_SEC` (default
+  30s) with a compact status/tool-log excerpt. On completion it flips to a **"Done"** status
+  ("✅ Done — result in the reply below.") — it never holds the full answer. Interactive cards are
+  updated via the Feishu **PATCH** endpoint (`message.patch`); PUT `/update` only supports text/post.
+- **Result message:** the actual answer is **always** delivered as a normal bot text message
+  (separate from the progress card), whether or not a card was shown.
+- **Approval card:** an interactive card with **four** buttons — **Approve** / **Approve all
+  (turn)** / **Deny** / **Deny + stop** — raised when a non-allowlisted tool is requested; resolved
+  by a button tap or a chat reply (`approve`/`all`/`deny`/`stop`), else auto-denied on timeout. On
+  resolution the card re-renders to keep only the clicked button. Approve ⇒ allow; Approve all ⇒
+  allow + auto-allow the rest of the turn; Deny ⇒ deny tool, continue; Deny + stop ⇒ deny + interrupt.
 - **Auto-replies:** single-flight rejection text; `(stopped)`; `(no activity — stopped)`;
   `(approval timed out)`.
 
@@ -224,10 +233,13 @@ async def request_approval(tool: str, inp: dict, scope) -> Approval:  # posts ca
 - Initialize first: `{"subtype":"initialize", ...}`; then user turns `{"type":"user","session_id":"",
   "message":{"role":"user","content":<text>},"parent_tool_use_id":null}`.
 - Inbound control (CLI ⇒ bridge): `subtype:"can_use_tool"` ⇒ look up tool in allowlist ⇒ allow, or
-  post an approval card and await the user's button ⇒ reply as a `control_response`:
-  Approve ⇒ `{"behavior":"allow"}`; Deny ⇒ `{"behavior":"deny","message":"user denied"}`;
-  Deny + stop ⇒ `{"behavior":"deny","message":"user denied","interrupt":true}` (the `interrupt` flag
-  also cancels the turn, mirroring the SDK's `PermissionResultDeny(interrupt=True)`). Timeout ⇒ deny.
+  post an approval card and await the user's button/reply ⇒ reply as a `control_response`:
+  Approve ⇒ `{"behavior":"allow"}`; Approve all (turn) ⇒ `{"behavior":"allow"}` + set a per-turn
+  auto-allow flag (subsequent `can_use_tool` in the turn return allow with no card); Deny ⇒
+  `{"behavior":"deny","message":"user denied"}`; Deny + stop ⇒
+  `{"behavior":"deny","message":"user denied","interrupt":true}` (the `interrupt` flag also cancels
+  the turn, mirroring the SDK's `PermissionResultDeny(interrupt=True)`). Timeout ⇒ deny. The verdict
+  arrives either as a `card.action.trigger` button tap OR a chat reply (`approve`/`all`/`deny`/`stop`).
   `subtype:"interrupt"` receipts ignored.
 - Interrupt: send `control_request {"subtype":"interrupt"}`; if no `result` within 5 s, `close()`
   (EOF → SIGTERM → SIGKILL) and mark the subprocess dead (next turn respawns with `--resume`).
@@ -276,7 +288,8 @@ ingest-post coverage into a new `tests/test_ingest.py`). **Modify:** `pyproject.
 - **New config keys** (`.env.example`): `FEISHU_WORKDIR` (default repo root), `FEISHU_MAX_CONCURRENT`
   (4), `FEISHU_STUCK_TIMEOUT` (180s), `FEISHU_APPROVAL_TIMEOUT` (300s),
   `FEISHU_AUTO_APPROVE_TOOLS` (`Read,Grep,Glob,WebSearch,WebFetch,TodoWrite`),
-  `FEISHU_CARD_THROTTLE_MS` (1500), `FEISHU_DEFAULT_PERMISSION_MODE` (`bypassPermissions` — used only
+  `FEISHU_CARD_THROTTLE_MS` (1500), `FEISHU_CARD_DEFER_SEC` (60), `FEISHU_CARD_INTERVAL_SEC` (30),
+  `FEISHU_DEFAULT_PERMISSION_MODE` (`bypassPermissions` — used only
   when approval cards are unavailable).
 - **CLAUDE.md constraint:** long-running commands (running the bridge, real claude) go through the
   dedicated tmux pane per workspace rules; quick read-only commands inline.
@@ -321,6 +334,10 @@ ingest-post coverage into a new `tests/test_ingest.py`). **Modify:** `pyproject.
 | D9 | Old layer | refactor in place vs new package | new `bridge/` package, delete `mcp_channel/` | clean unification; old MCP/PTY design fully retired | 2026-08-08 |
 | D10 | Approval card buttons | (a) Approve/Deny (b) three-button Approve/Deny/Deny+stop | (b) three-button | Deny+stop maps cleanly to `PermissionResultDeny(interrupt=true)`; gives the user an explicit "abort" without reaching for the streaming card's Stop button | 2026-08-08 |
 | D11 | Streaming card content | (a) minimal status only (b) compact tool log + partial answer (c) full thinking/noise | (b) compact tool log + partial answer | enough signal that long turns don't look frozen, without dumping raw reasoning; the open-source bridge's CoT philosophy, trimmed | 2026-08-08 |
+| D12 | Progress card timing + role | (a) card at turn start w/ full answer (b) deferred status-only card + result as a separate message | (b) | live-smoke feedback: early card + answer-in-card was noisy and never updated cleanly; defer 60s/30s, status-only on done, result as a bot message | 2026-08-10 |
+| D13 | "Approve all (turn)" mode-change | (a) per-tool only (b) add an escalate button | (b) | tool-heavy tasks needed ~10 clicks; a per-turn escalation (resets each turn) cuts friction while preserving the per-turn safety re-confirm | 2026-08-10 |
+| D14 | Interactive card update API | PUT `/update` vs PATCH `/patch` | PATCH | Feishu's PUT update only supports text/post; interactive cards require the PATCH endpoint (body = content only, no msg_type). Found via live error 230001 | 2026-08-10 |
+| D15 | Approval resolution channels | (a) card buttons only (b) buttons + chat reply | (b) | card.action.trigger delivery depends on console subscription; replying approve/deny/stop works over the message channel with no setup — ship both | 2026-08-10 |
 
 ## Appendix B — Glossary
 - **Scope:** the conversation unit the bridge tracks — `chat_id`, or `chat_id:thread_id` in topics.

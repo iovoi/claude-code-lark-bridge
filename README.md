@@ -14,13 +14,17 @@ Feishu/Lark ──ws──▶ bridge ──stdin(NDJSON user turns)──▶ cla
 
 - You DM the bot. The bridge stamps an **OnIt** reaction and sends your message to a
   long-lived `claude` subprocess (one per chat).
-- Claude works autonomously — searching, editing, running commands. Progress streams to a
-  **live card** in chat (compact tool log + the answer as it forms).
+- Claude works autonomously — searching, editing, running commands. If a turn runs longer
+  than 60s, a **"Working…" progress card** appears and updates every 30s (status + tool
+  log only). Short turns send no card.
 - When Claude wants a tool **not** on the auto-approve list, the bridge posts an
-  **approval card** (Approve / Deny / Deny+stop); the turn pauses until you tap.
-- On completion the answer is finalized on the card and the reaction swaps to **Done**.
+  **approval card** — **Approve / Approve all (turn) / Deny / Deny+stop** — and the turn
+  pauses. Tap a button, or reply `approve` / `all` / `deny` / `stop` in chat. "Approve
+  all (turn)" auto-approves the rest of that turn (re-confirms next turn).
+- On completion the progress card flips to **"Done"** and the **result is delivered as a
+  normal bot message**; the reaction swaps to **Done**.
 - Conversation history + memory persist per chat (the same claude session is `--resume`d
-  across turns and restarts). Send **`/stop`** to cancel a turn.
+  across turns and restarts). Send **`/stop`** (or the card's Stop button) to cancel a turn.
 
 The agent layer is pluggable (`bridge/agent/`); Claude is implemented now.
 
@@ -111,6 +115,10 @@ anything beyond personal testing.
 - Text and rich-text (`post`) inbound; image/file attachments are not parsed.
 - Topic-group threads are folded into scope identity (`chat_id:thread_id`) but render in the chat.
 - **Tool approvals:** when Claude wants a tool off the auto-approve list, an interactive card with
-  **Approve / Deny / Deny+stop** buttons is posted. You can tap a button, or reply in chat with
-  `approve` / `deny` / `stop` (or y/n/1/2/3) — both work over the websocket long-connection.
+  **Approve / Approve all (turn) / Deny / Deny+stop** buttons is posted. Tap a button, or reply in
+  chat with `approve` / `all` / `deny` / `stop` (or y/n/1/2/3) — both work over the websocket
+  long-connection. "Approve all (turn)" auto-approves subsequent tools in the same turn.
+- **Progress vs result:** the progress card is a status indicator only; on completion it shows
+  "Done" and the actual result is sent as a separate bot message. Interactive cards are updated
+  via the Feishu **PATCH** endpoint (`message.patch`).
 - Live-validated against real `claude` (print/streaming + hand-rolled control protocol) end-to-end.

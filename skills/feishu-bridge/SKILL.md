@@ -20,10 +20,11 @@ venv by `install.py`); in local dev use `{{PY}} -m bridge`.
 The bridge drives Claude Code in **non-interactive streaming mode**
 (`claude -p --input-format stream-json --output-format stream-json`), one long-lived
 process per chat. It hand-rolls the bidirectional control protocol so it can show
-**Lark approval cards** (Approve / Deny / Deny+stop) when Claude wants a tool off the
-allowlist, and a **live streaming card** of progress. No PTY, no tmux, identical on
-Windows / Mac / Linux. On a message: stamp `OnIt` → run the turn → post the answer → swap
-to `Done`. Send `/stop` to cancel a turn. Conversation history + memory persist per chat
+**Lark approval cards** (Approve / Approve all (turn) / Deny / Deny+stop) when Claude wants a
+tool off the allowlist — tap a button or reply `approve`/`all`/`deny`/`stop` in chat; and a
+**deferred "Working…" progress card** (only after 60s, status-only). No PTY, no tmux, identical on
+Windows / Mac / Linux. On a message: stamp `OnIt` → run the turn → post the answer as a bot
+message → swap to `Done`. Send `/stop` to cancel a turn. Conversation history + memory persist per chat
 (claude session, `--resume`d across restarts).
 
 ## To SET UP / RUN the bridge (user says "set up/run/start/bring up/connect the bridge")
@@ -45,8 +46,8 @@ to `Done`. Send `/stop` to cancel a turn. Conversation history + memory persist 
    - native Windows: `{{REPO}}/run-bridge.bat`
    - or directly: `feishu-bridge up`  (local dev: `{{PY}} -m bridge` then `... up`, or `{{PY}} -m bridge run` for foreground/debug)
 5. **Report**: "The bridge is UP. DM your bot on Feishu/Lark — your messages reach Claude
-   here; Claude works on `FEISHU_WORKDIR`, shows progress on a streaming card, asks for
-   approval on risky tools, and replies (OnIt→Done) in chat. Send `/stop` to cancel a
+   here; Claude works on `FEISHU_WORKDIR`, shows a "Working…" card on long turns (>60s), asks for
+   approval on risky tools, and replies as a bot message (OnIt→Done) in chat. Send `/stop` to cancel a
    turn." Logs: `~/.chat_bridge/bridge.log`.
 
 ## To MANAGE an already-running bridge (user says "stop" / "is it up?")

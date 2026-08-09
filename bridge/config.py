@@ -50,6 +50,10 @@ class BridgeConfig:
     auto_approve_tools: set[str]
     # Minimum gap between streaming-card updates, in milliseconds.
     card_throttle_ms: int
+    # A turn runs this long (seconds) before any "Working..." progress card is sent.
+    card_defer_sec: int
+    # Once the progress card exists, update it every this many seconds.
+    card_interval_sec: int
     # Permission mode used when approval cards are unavailable (e.g. claude lacks
     # --permission-prompt-tool). Normally approvals drive the policy instead.
     default_permission_mode: str
@@ -83,6 +87,8 @@ class BridgeConfig:
             approval_timeout=_int("FEISHU_APPROVAL_TIMEOUT", 300),
             auto_approve_tools=auto,
             card_throttle_ms=_int("FEISHU_CARD_THROTTLE_MS", 1500),
+            card_defer_sec=_int("FEISHU_CARD_DEFER_SEC", 60),
+            card_interval_sec=_int("FEISHU_CARD_INTERVAL_SEC", 30),
             default_permission_mode=_env("FEISHU_DEFAULT_PERMISSION_MODE", "bypassPermissions"),
             emoji_working=_env("FEISHU_EMOJI_WORKING", feishu_api.EMOJI_WORKING),
             emoji_done=_env("FEISHU_EMOJI_DONE", feishu_api.EMOJI_DONE),

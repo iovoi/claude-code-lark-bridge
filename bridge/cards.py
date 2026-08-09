@@ -121,6 +121,33 @@ def render_approval_card(*, tool: str, summary: str, context: str, token: str, s
     }
 
 
+def render_approval_card_resolved(*, tool: str, chosen: str, summary: str, context: str) -> dict:
+    """Render an approval card AFTER a verdict: header reflects the choice, and only the
+    button that was clicked is retained (the others removed) so the user sees what they picked.
+
+    chosen is the internal verdict: 'allow' | 'deny' | 'deny_stop'."""
+    info = {
+        "allow": ("✓ Approved", "green", "Approve", "primary"),
+        "deny": ("✕ Denied", "grey", "Deny", "default"),
+        "deny_stop": ("✕ Denied + stopped", "grey", "Deny + stop", "danger"),
+    }.get(chosen, ("Resolved", "grey", chosen, "default"))
+    title, template, label, btype = info
+    elements = [{"tag": "div", "text": _md(f"**Tool:** `{tool}`")}]
+    if summary:
+        elements.append({"tag": "div", "text": _md(f"```\n{_truncate(summary, 400)}\n```")})
+    elements.append({"tag": "note", "elements": [_plain(f"you clicked: {label}")]})
+    # Retain only the chosen button (disabled-looking: same label, no action changes state).
+    elements.append({"tag": "action", "actions": [
+        {"tag": "button", "type": btype, "text": _plain(f"{label}  ✓"),
+         "value": {"v": "noop"}, "disabled": True},
+    ]})
+    return {
+        "config": {"wide_screen_mode": True, "update_multi": True},
+        "header": {"title": _plain(title), "template": template},
+        "elements": elements,
+    }
+
+
 def _truncate(s: str, n: int) -> str:
     s = (s or "").strip()
     return s if len(s) <= n else s[: n - 1] + "…"

@@ -81,18 +81,37 @@ def _cfg(tmp_path):
     return cfg
 
 
-def test_turn_emoji_cycle_and_streaming_card(tmp_path):
+def test_short_turn_delivers_text_no_card(tmp_path):
+    """A turn that finishes under card_defer_sec sends NO progress card; the OnIt emoji
+    acknowledges receipt and the answer is delivered as a text message."""
     async def go():
-        cfg = _cfg(tmp_path)
+        cfg = _cfg(tmp_path)  # card_defer_sec defaults to 60
         lark = FakeLark(cfg)
         runner = ScopeRunner("oc_1", "oc_1", cfg, lark, ApprovalManager(lark, cfg),
                              adapter_factory=lambda: FakeAdapter())
         await runner.handle_message({"message_id": "m1", "chat_id": "oc_1", "text": "hi"})
-        assert lark.onit == ["m1"]            # OnIt stamped
+        assert lark.onit == ["m1"]            # OnIt stamped (the ack)
         assert "m1" in lark.done              # Done stamped
         assert "onit-rid" in lark.deleted     # OnIt removed on swap
-        assert len(lark.cards) >= 1           # streaming card created
-        assert len(lark.updates) >= 1         # finalized
+        assert any("the answer" in t for t in lark.texts)  # answer delivered as text
+        assert lark.cards == []               # no progress card (short turn)
+
+    asyncio.run(go())
+
+
+def test_long_turn_shows_progress_card(tmp_path):
+    """A turn still running past card_defer_sec shows a progress card (updated on done)."""
+    async def go():
+        cfg = _cfg(tmp_path)
+        cfg.card_defer_sec = 0      # show the card immediately
+        cfg.card_interval_sec = 10
+        lark = FakeLark(cfg)
+        runner = ScopeRunner("oc_1b", "oc_1b", cfg, lark, ApprovalManager(lark, cfg),
+                             adapter_factory=lambda: SlowAdapter())
+        await runner.handle_message({"message_id": "m1", "chat_id": "oc_1b", "text": "hi"})
+        assert len(lark.cards) >= 1           # progress card created
+        assert len(lark.updates) >= 1         # finalized to done
+        assert "m1" in lark.done
 
     asyncio.run(go())
 

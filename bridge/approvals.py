@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
-from .cards import render_streaming_card
+from .cards import render_approval_card_resolved, render_streaming_card
 from .config import BridgeConfig
 from .lark import Lark
 
@@ -26,6 +26,7 @@ class _Pending:
     chat_id: str
     scope: str
     tool: str
+    summary: str = ""
     card_message_id: Optional[str] = None
 
 
@@ -68,14 +69,15 @@ class ApprovalManager:
         card_msg = self._lark.send_approval_card(
             chat_id, tool=tool, summary=summary, context=context, token=token, scope=scope
         )
-        pending = _Pending(future=fut, chat_id=chat_id, scope=scope, tool=tool, card_message_id=card_msg)
+        pending = _Pending(future=fut, chat_id=chat_id, scope=scope, tool=tool,
+                           summary=summary, card_message_id=card_msg)
         self._pending[token] = pending
         try:
             return await asyncio.wait_for(fut, timeout=self._cfg.approval_timeout)
         except asyncio.TimeoutError:
             print(f"[approval {scope}] TIMED OUT after {self._cfg.approval_timeout}s (auto-deny)",
                   file=sys.stderr, flush=True)
-            self._mark_card(pending, "⏱ Approval timed out (auto-denied)", "grey")
+            self._mark_card(pending, "deny", title_override="⏱ Timed out (auto-denied)")
             return "deny"
         finally:
             self._pending.pop(token, None)
@@ -101,23 +103,21 @@ class ApprovalManager:
         v = v if v in ("allow", "deny", "deny_stop") else "deny"
         print(f"[approval {pending.scope}] resolved -> {v} (tool={pending.tool})",
               file=sys.stderr, flush=True)
-        if v == "allow":
-            self._mark_card(pending, f"✓ Approved — continuing ({pending.tool})", "green")
-        elif v == "deny_stop":
-            self._mark_card(pending, f"✕ Denied + stopping turn ({pending.tool})", "grey")
-        else:
-            self._mark_card(pending, f"✕ Denied ({pending.tool})", "grey")
+        self._mark_card(pending, v)
         pending.future.set_result(v)
         return True
 
-    def _mark_card(self, pending: _Pending, text: str, template: str) -> None:
+    def _mark_card(self, pending: _Pending, verdict: str, title_override: str = "") -> None:
+        """Re-render the approval card to its resolved state: header reflects the choice and
+        only the clicked button is retained (the others removed)."""
         if not pending.card_message_id:
             return
-        card = {
-            "config": {"wide_screen_mode": True, "update_multi": True},
-            "header": {"title": {"tag": "plain_text", "content": text}, "template": template},
-            "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": f"Tool: `{pending.tool}`"}}],
-        }
+        card = render_approval_card_resolved(
+            tool=pending.tool, chosen=verdict, summary=pending.summary, context="",
+        )
+        if title_override:
+            card["header"]["title"]["content"] = title_override
+            card["header"]["template"] = "grey"
         try:
             self._lark.update_card(pending.card_message_id, card)
         except Exception:

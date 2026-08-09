@@ -163,11 +163,12 @@ class ScopeRunner:
         cost = result.get("cost_usd")
         if isinstance(cost, (int, float)):
             self._state.usage = f"💰 ${cost:.4f}"
+        delivered = False
         if self._card is not None and self._card.msg_id is not None:
-            # Progress card was shown -> update it to the final state.
-            await self._card.finalize(self._state)
-        else:
-            # Short task (no progress card) -> deliver the answer as a text message.
+            # Progress card was shown -> try to update it to the final state (best-effort).
+            delivered = await self._card.finalize(self._state)
+        if not delivered:
+            # No card, or the card update failed -> deliver the answer as a text message.
             answer = (self._state.answer or "").strip()
             self.lark.send_text(self.chat_id, answer[:4000] if answer else "(done)")
         self.lark.swap_to_done(message_id, onit)

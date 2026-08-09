@@ -179,20 +179,21 @@ class StreamingCard:
         if now - self._last_send >= self._throttle:
             self._flush()
 
-    async def finalize(self, state: CardState) -> None:
+    async def finalize(self, state: CardState) -> bool:
         state.phase = state.phase or "done"
         self._last_state = state
         self._dirty = True
-        self._flush(final=True)
+        return self._flush(final=True)
 
     def flush_pending(self) -> None:
         """Push any throttled-but-pending update (e.g. on interrupt)."""
         if self._dirty:
             self._flush()
 
-    def _flush(self, *, final: bool = False) -> None:
+    def _flush(self, *, final: bool = False) -> bool:
         if self.msg_id is None or self._last_state is None:
-            return
-        self._lark.update_card(self.msg_id, render_streaming_card(self._last_state, with_stop=not final))
+            return False
+        ok = self._lark.update_card(self.msg_id, render_streaming_card(self._last_state, with_stop=not final))
         self._last_send = time.monotonic()
         self._dirty = False
+        return bool(ok)

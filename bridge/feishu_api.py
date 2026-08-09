@@ -221,25 +221,31 @@ def send_card(chat_id: str, card: dict):
 
 
 def update_card(message_id: str, card: dict) -> bool:
-    """Edit an interactive card the bot previously sent (PUT im/v1/messages/:id).
+    """Edit an interactive card the bot previously sent.
 
-    Re-renders the whole card from `card`. Fail-soft: returns False on any error so
-    callers can skip a failed throttled update without crashing the turn."""
-    from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
+    Interactive cards are updated via the PATCH endpoint (im/v1/messages/:id/patch),
+    NOT the PUT update endpoint (which only supports text/post). Re-renders the whole
+    card from `card`. Fail-soft: returns False on any error."""
+    import sys as _sys
+    from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
     req = (
-        UpdateMessageRequest.builder()
+        PatchMessageRequest.builder()
         .message_id(message_id)
         .request_body(
-            UpdateMessageRequestBody.builder()
+            PatchMessageRequestBody.builder()
             .content(json.dumps(card, ensure_ascii=False))
             .build()
         )
         .build()
     )
     try:
-        resp = client().im.v1.message.update(req)
-    except Exception:
+        resp = client().im.v1.message.patch(req)
+    except Exception as e:  # noqa: BLE001
+        print(f"[lark] update_card exception: {e!r}", file=_sys.stderr, flush=True)
         return False
+    if not resp.success():
+        print(f"[lark] update_card FAILED code={getattr(resp, 'code', None)} "
+              f"msg={getattr(resp, 'msg', None)}", file=_sys.stderr, flush=True)
     return resp.success()
 
 

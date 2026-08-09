@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -72,6 +73,8 @@ class ApprovalManager:
         try:
             return await asyncio.wait_for(fut, timeout=self._cfg.approval_timeout)
         except asyncio.TimeoutError:
+            print(f"[approval {scope}] TIMED OUT after {self._cfg.approval_timeout}s (auto-deny)",
+                  file=sys.stderr, flush=True)
             self._mark_card(pending, "⏱ Approval timed out (auto-denied)", "grey")
             return "deny"
         finally:
@@ -94,6 +97,8 @@ class ApprovalManager:
         if pending is None or pending.future.done():
             return False
         v = verdict if verdict in ("allow", "deny", "deny_stop") else "deny"
+        print(f"[approval {pending.scope}] resolved -> {v} (tool={pending.tool})",
+              file=sys.stderr, flush=True)
         if v == "allow":
             self._mark_card(pending, f"✓ Approved — continuing ({pending.tool})", "green")
         elif v == "deny_stop":

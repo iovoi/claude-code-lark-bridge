@@ -82,6 +82,8 @@ class Runtime:
         # approval is pending in this scope, a reply of approve/deny/stop resolves it.
         if self.approvals.pending_for_scope(scope) is not None:
             verdict = _verdict_from_text(text)
+            print(f"[reply-approval {scope}] text={text!r} -> verdict={verdict!r}",
+                  file=sys.stderr, flush=True)
             if verdict:
                 self.approvals.resolve_for_scope(scope, verdict)
                 self.lark.send_text(chat_id, f"(approval: {verdict})")
@@ -92,6 +94,8 @@ class Runtime:
 
     async def _handle_card_action(self, action: dict) -> None:
         val = action.get("value") or {}
+        print(f"[card-action] received; value={val!r} message_id={action.get('message_id')}",
+              file=sys.stderr, flush=True)
         if not isinstance(val, dict):
             return
         verb = val.get("v")

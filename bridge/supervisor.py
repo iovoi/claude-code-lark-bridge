@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import feishu_api
+from . import feishu_api
 
 REPO = feishu_api.PROJECT_DIR
 RUN_DIR = Path(os.environ.get("FEISHU_RUN_DIR", str(Path.home() / ".chat_bridge")))

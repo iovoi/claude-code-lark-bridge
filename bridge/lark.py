@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-import feishu_api
+from . import feishu_api
 
 from .cards import render_approval_card
 from .config import BridgeConfig

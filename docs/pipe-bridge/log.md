@@ -18,6 +18,59 @@ Copy the template below, fill it in, and insert it at the top of "Entries".
 
 ## Entries
 
+### 2026-08-09 — Live Feishu smoke: OnIt + streaming card + approval card confirmed; card-action delivery needs console subscription (reply-fallback added)
+- **Task:** T8.1 (live smoke, in progress)
+- **What happened:** Bridge is LIVE against the user's Feishu app (websocket `connected to
+  wss://msg-frontier.feishu.cn/...`). A real DM arrived and triggered a `claude` turn (spawns
+  `claude -p --input-format stream-json ... --permission-prompt-tool stdio --add-dir=<workdir>`).
+  The user observed the **OnIt reaction**, a **working/streaming card**, and an **approval card**
+  when Claude attempted a tool — i.e. the full UX works visually. BUT: clicking **Approve** on the
+  card **did not reach the bridge** (Feishu redirected to a "create app" page; no `card.action.trigger`
+  event in the log; the `claude` turn stayed blocked on `can_use_tool` until the 300s auto-deny).
+- **Discovery / blocker:** (1) Card-action buttons are delivered as the `card.action.trigger` event,
+  which the app must **subscribe to** in the Feishu Developer Console (Events & Callbacks) — the
+  message event is subscribed (DMs arrive), but the card-action event is not, so button taps fall
+  through to Feishu's default. (2) The card-action handler method in lark_oapi 1.7.1 is
+  `register_p2_card_action_trigger` (no `_v1`) — fixed. (3) A stale top-level `feishu_api.py` copy in
+  site-packages (from the old non-editable install) shadowed the repo module and gave empty creds
+  when run via the console script → **moved `feishu_api.py` into the `bridge/` package** so
+  `PROJECT_DIR` reliably resolves to the repo; `load_env` now also searches `FEISHU_ENV_FILE`/cwd.
+  (4) An interrupted `uv pip install --reinstall` corrupted `lark_oapi` (missing `api/docs`) →
+  reinstalled `lark-oapi==1.7.1`.
+- **Resolution / workaround:** Added a **reply-based approval fallback** that works over the
+  (already-working) message channel: while an approval is pending in a scope, a reply of
+  `approve`/`deny`/`stop` (or y/n/1/2/3) resolves it (`approvals.resolve_for_scope` +
+  `runtime._verdict_from_text`). The approval card now hints "reply approve / deny / stop". The
+  button path still requires the console `card.action.trigger` subscription (documented for the user).
+  Also: watchdog now bumps per-frame (covers `thinking_tokens`); ingest `feishu_api.cred`→`api.cred`.
+- **PRD impact:** amended §4.2/§4.5 implicitly (approvals now resolvable by reply OR card action);
+  the card-action subscription is an app-console prerequisite noted in README/SKILL (to add).
+
+### 2026-08-08 — LIVE protocol validated against real claude 2.1.226 (Phase 8 smoke, in progress)
+- **Task:** T8.1 (live smoke)
+- **What happened:** Drove real `claude -p --input-format stream-json --output-format stream-json`
+  via a probe (`$CLAUDE_JOB_DIR/tmp/probe_claude.py`) that mirrors `Transport` exactly. CONFIRMED
+  against the real binary:
+  - `control_request {subtype:"initialize"}` → `control_response` (success, carries the slash-command list). ✓
+  - `system/init` with `session_id` at the **top level** (not under `data`) → captured by `_map_frame`. ✓
+  - `assistant` content blocks (text / thinking / tool_use) → mapped. ✓
+  - inbound `control_request {subtype:"can_use_tool", tool_name, input, permission_suggestions}`
+    with a top-level `request_id` → our `control_response {behavior:"allow"}` → claude runs the
+    tool → `user` `tool_result` → assistant text → `result`. ✓✓✓ (the whole approval control path)
+  - `--permission-prompt-tool stdio` is a real (hidden, not in `--help`) flag and works. ✓
+  - Real side effect confirmed: the probed Bash tool wrote `/tmp/pipe_bridge_smoke.txt`.
+- **Discovery / blocker:** (1) glm-5.2 floods `system/thinking_tokens` partial frames; the adapter
+  ignores them but they emit no `AgentEvent`, so the stuck watchdog (bumped per *event*) wouldn't
+  see them → **fixed**: `ClaudeAdapter.run_turn(on_frame=...)` bumps the watchdog per *frame*;
+  `ScopeRunner` passes `wd.bump`. (2) `bridge/ingest.py` `start_ws` referenced `feishu_api.cred`
+  but the module imports `feishu_api as api` → `NameError` crashed the detached bridge on start;
+  **fixed** to `api.cred`. (3) `lark_oapi` import off `/mnt/c` drvfs is slow (~1-2 min) before the
+  websocket connects — expected.
+- **Resolution / workaround:** both fixes applied; suite still 32 passed; bridge now starts and
+  stays up (pid observed running). Awaiting websocket connect to complete the end-to-end Feishu smoke.
+- **PRD impact:** none — the live frames match the spec/stub; the `system/init` session_id location
+  is now confirmed (top-level), which `_map_frame` already handles.
+
 ### 2026-08-08 — Phase 6 (install/docs/old-layer removal) complete
 - **Task:** T6.1–T6.3
 - **What happened:** Reworked `install.py` (uv-based, no `.mcp.json`/`[windows]`/pywinpty,

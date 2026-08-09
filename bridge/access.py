@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sys
 
-import feishu_api
+from . import feishu_api
 
 
 def _split(v: str | None) -> set[str]:

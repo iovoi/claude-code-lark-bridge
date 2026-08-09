@@ -19,14 +19,32 @@ import re
 import tempfile
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
+# bridge/feishu_api.py -> parent = bridge package dir, parent.parent = the repo/project root.
+# Robust whether imported from an editable checkout (-> repo) or run from an installed copy
+# (the caller sets cwd to the install dir; load_env also checks cwd / FEISHU_ENV_FILE).
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+
+def _env_candidates() -> list[Path]:
+    cands: list[Path] = []
+    explicit = os.environ.get("FEISHU_ENV_FILE")
+    if explicit:
+        cands.append(Path(explicit).expanduser())
+    cands.append(Path.cwd() / ".env")
+    cands.append(PROJECT_DIR / ".env")
+    return cands
 
 
 def load_env(path: Path = None) -> None:
     """Load a .env file. Never overrides existing env vars. Strips inline `#` comments that are
-    preceded by whitespace AND outside of quotes (so values like URLs containing # are safe)."""
-    path = path or (PROJECT_DIR / ".env")
-    if not path.is_file():
+    preceded by whitespace AND outside of quotes (so values like URLs containing # are safe).
+    With no explicit path, searches FEISHU_ENV_FILE, then cwd/.env, then PROJECT_DIR/.env."""
+    if path is None:
+        for c in _env_candidates():
+            if c.is_file():
+                path = c
+                break
+    if path is None or not path.is_file():
         return
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()

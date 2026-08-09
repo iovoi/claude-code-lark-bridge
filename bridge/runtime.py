@@ -20,6 +20,18 @@ from .lark import Lark
 from .scope import ScopeRunner
 
 
+def _verdict_from_text(text: str) -> str | None:
+    """Map a user reply to an approval verdict (allow/deny/deny_stop), or None if unrecognized."""
+    t = (text or "").strip().lower()
+    if t in ("approve", "yes", "y", "ok", "1", "允许", "同意"):
+        return "allow"
+    if t in ("stop", "deny_stop", "abort", "cancel", "3", "取消", "停止"):
+        return "deny_stop"
+    if t in ("deny", "no", "n", "2", "拒绝"):
+        return "deny"
+    return None
+
+
 class Runtime:
     def __init__(self, cfg: BridgeConfig) -> None:
         self.cfg = cfg
@@ -64,6 +76,16 @@ class Runtime:
             if not ok:
                 self.lark.send_text(chat_id, "(nothing to stop)")
             return
+
+        # Reply-based approval resolution: a fallback for when card-action buttons aren't
+        # delivered to the bot (the app hasn't subscribed to card.action.trigger). While an
+        # approval is pending in this scope, a reply of approve/deny/stop resolves it.
+        if self.approvals.pending_for_scope(scope) is not None:
+            verdict = _verdict_from_text(text)
+            if verdict:
+                self.approvals.resolve_for_scope(scope, verdict)
+                self.lark.send_text(chat_id, f"(approval: {verdict})")
+                return
 
         async with self._sem:
             await runner.handle_message(evt)

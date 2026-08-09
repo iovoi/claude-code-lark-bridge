@@ -122,7 +122,7 @@ class ScopeRunner:
         self._watchdog = wd
         result: dict = {}
         try:
-            result = await self._adapter.run_turn(prompt, self._emit)
+            result = await self._adapter.run_turn(prompt, self._emit, on_frame=wd.bump)
         except Exception as e:
             self._state.phase = "error"
             self._state.status = f"error: {e}"

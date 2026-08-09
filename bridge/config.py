@@ -12,7 +12,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import feishu_api  # ensures load_env() has run; exposes cred(), PROJECT_DIR, CONVERSATION_DIR
+from . import feishu_api  # ensures load_env() has run; exposes cred(), PROJECT_DIR, CONVERSATION_DIR
 
 PROJECT_DIR: Path = feishu_api.PROJECT_DIR
 

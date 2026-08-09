@@ -16,7 +16,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
-import feishu_api as api  # APP_ID/APP_SECRET only; does NOT import lark at top
+from . import feishu_api as api  # APP_ID/APP_SECRET only; does NOT import lark at top
 
 OnMessage = Callable[[dict], None]
 OnCardAction = Callable[[dict], None]
@@ -102,7 +102,7 @@ def start_ws(
     on_card_action: Optional[OnCardAction] = None,
 ) -> threading.Thread:
     """Start the Feishu websocket client in a daemon thread; return the thread."""
-    if feishu_api.cred("FEISHU_DISABLE_WS") == "1":
+    if api.cred("FEISHU_DISABLE_WS") == "1":
         print("[ws] FEISHU_DISABLE_WS=1 — websocket not started", file=sys.stderr)
         t = threading.Thread(target=lambda: None, daemon=True, name="feishu-ws-disabled")
         t.start()
@@ -113,6 +113,9 @@ def start_ws(
         from lark_oapi.api.im.v1 import P2ImMessageReceiveV1  # noqa: F401
 
         api.route_lark_logs_to_stderr()
+        print(f"[ws] creds: app_id={'set' if api.APP_ID else 'EMPTY'} "
+              f"({api.APP_ID[:6]!r}) secret={'set' if api.APP_SECRET else 'EMPTY'}",
+              file=sys.stderr, flush=True)
 
         def on_receive(data) -> None:
             try:
@@ -165,7 +168,7 @@ def start_ws(
             builder = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(on_receive)
             if on_card_action is not None:
                 try:
-                    builder = builder.register_p2_card_action_trigger_v1(on_card)
+                    builder = builder.register_p2_card_action_trigger(on_card)
                 except AttributeError:
                     print("[ws] card.action.trigger registration unavailable in this lark_oapi",
                           file=sys.stderr)

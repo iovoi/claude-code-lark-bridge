@@ -80,6 +80,17 @@ class ApprovalManager:
     def resolve(self, token: str, verdict: str) -> bool:
         """Resolve a pending approval from a card-action tap. Returns True if it matched."""
         pending = self._pending.get(token)
+        return self._apply(pending, verdict)
+
+    def resolve_for_scope(self, scope: str, verdict: str) -> bool:
+        """Resolve the pending approval for a scope via a reply message (fallback when
+        card-action buttons aren't delivered). Returns True if a pending approval matched."""
+        for token, pending in self._pending.items():
+            if pending.scope == scope:
+                return self._apply(pending, verdict)
+        return False
+
+    def _apply(self, pending: "_Pending | None", verdict: str) -> bool:
         if pending is None or pending.future.done():
             return False
         v = verdict if verdict in ("allow", "deny", "deny_stop") else "deny"

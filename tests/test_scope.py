@@ -56,7 +56,7 @@ class FakeAdapter:
     async def start(self):
         self.started = True
 
-    async def run_turn(self, prompt, emit):
+    async def run_turn(self, prompt, emit, on_frame=None):
         await emit(TextEvent(text="the answer"))
         await emit(DoneEvent(session_id="s-fake"))
         return {"session_id": "s-fake", "cost_usd": 0.002}
@@ -69,7 +69,7 @@ class FakeAdapter:
 
 
 class SlowAdapter(FakeAdapter):
-    async def run_turn(self, prompt, emit):
+    async def run_turn(self, prompt, emit, on_frame=None):
         await asyncio.sleep(0.3)
         return {"session_id": "s-fake"}
 

@@ -101,6 +101,8 @@ def render_approval_card(*, tool: str, summary: str, context: str, token: str, s
         body.append({"tag": "div", "text": _md(f"```\n{_truncate(summary, 800)}\n```")})
     if context:
         body.append({"tag": "note", "elements": [_plain("task: " + _truncate(context, 200))]})
+    body.append({"tag": "note", "elements": [_plain(
+        "Tip: if the buttons don't respond, reply in chat: approve / deny / stop")]})
     body.append({
         "tag": "action",
         "actions": [

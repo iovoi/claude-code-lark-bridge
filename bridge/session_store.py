@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import feishu_api
+from . import feishu_api
 
 _SESSIONS_FILE: Path = feishu_api.CONVERSATION_DIR / "sessions.json"
 

@@ -138,10 +138,12 @@ class ClaudeAdapter:
         except RuntimeError as e:
             print(f"[claude] initialize error: {e!r} (continuing)", file=sys.stderr)
 
-    async def run_turn(self, prompt: str, emit: Emit) -> dict[str, Any]:
+    async def run_turn(self, prompt: str, emit: Emit, on_frame: Any = None) -> dict[str, Any]:
         await self._transport.send_user_turn(prompt)
         result_info: dict[str, Any] = {"session_id": self.session_id}
         async for frame in self._transport.events():
+            if on_frame is not None:
+                on_frame()  # heartbeat per frame (covers thinking_tokens, which emit no event)
             for evt in _map_frame(frame, self._session_id_ref):
                 await emit(evt)
             if isinstance(frame, dict) and frame.get("type") == "result":

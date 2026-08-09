@@ -1,6 +1,6 @@
 # PRD: Pipe Bridge — unified streaming print-mode Feishu/Lark ↔ Claude Code bridge
 
-- **Status:** Draft
+- **Status:** Complete
 - **Feature dir:** `docs/pipe-bridge/`
 - **Created:** 2026-08-08 · **Last updated:** 2026-08-08
 

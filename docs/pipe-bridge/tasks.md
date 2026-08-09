@@ -111,6 +111,6 @@
 - [x] **T8.1** Run every acceptance criterion from PRD §3 (1–12); record results in `log.md`.
   - Acceptance: all 12 pass; manual ones (1, 7 live, smoke) executed in the tmux pane with results noted.
   - Depends on: all above
-- [ ] **T8.2** Update `prd.md` Status → Complete; write final `log.md` summary; commit on `feat/pipe-bridge` and open PR.
+- [x] **T8.2** Update `prd.md` Status → Complete; write final `log.md` summary; commit on `feat/pipe-bridge` and open PR.
   - Acceptance: PRD marked Complete; PR opened against `main`.
   - Depends on: T8.1

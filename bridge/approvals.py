@@ -96,7 +96,9 @@ class ApprovalManager:
     def _apply(self, pending: "_Pending | None", verdict: str) -> bool:
         if pending is None or pending.future.done():
             return False
-        v = verdict if verdict in ("allow", "deny", "deny_stop") else "deny"
+        # Normalize vocabulary: card buttons use "approve" (and reply maps to "allow").
+        v = "allow" if verdict == "approve" else verdict
+        v = v if v in ("allow", "deny", "deny_stop") else "deny"
         print(f"[approval {pending.scope}] resolved -> {v} (tool={pending.tool})",
               file=sys.stderr, flush=True)
         if v == "allow":

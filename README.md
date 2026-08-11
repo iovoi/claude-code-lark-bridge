@@ -97,7 +97,7 @@ anything beyond personal testing.
   `agent/` (`AgentAdapter`, `ClaudeAdapter`), `scope.py` (per-chat orchestration),
   `runtime.py` (loop + intake), `supervisor.py` (detached up/status/stop), `cards.py`,
   `approvals.py`, `ingest.py`, `lark.py`, `session_store.py`, `watchdog.py`, `config.py`.
-- `feishu_api.py` — Feishu REST client (send/react/update + cards), reused by the bridge.
+- `bridge/feishu_api.py` — Feishu REST client (send/react/update + cards), part of the bridge package.
 - `tests/` — unit + end-to-end tests, including `fake_claude.py` (a stub that speaks the
   streaming + control protocol) and `test_adapter_e2e.py`.
 - `docs/pipe-bridge/` — PRD, task list, implementation log.

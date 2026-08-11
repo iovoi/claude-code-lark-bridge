@@ -218,7 +218,8 @@ def make_venv() -> None:
     target = str(REPO)
     # Checkpoint: if the package already imports in the venv, a previous run finished
     # this step — skip the (slow) reinstall. Lets an interrupted install resume cheaply.
-    if _venv_has_pkg("bridge") and _venv_has_pkg("feishu_api"):
+    # (feishu_api is now inside the bridge package as bridge.feishu_api, not top-level.)
+    if _venv_has_pkg("bridge"):
         _step("bridge package + deps already present; skipping install.")
     else:
         _step("installing bridge package + deps via uv (faster than pip) …")

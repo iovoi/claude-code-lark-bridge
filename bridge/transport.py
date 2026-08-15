@@ -73,7 +73,13 @@ def _build_claude_argv(
     """Construct the claude argv. ``--flag=value`` form is used for values that may
     start with ``-`` to avoid flag injection (mirrors the SDK)."""
     argv = [
-        claude_bin,
+        # npm-installed claude on Windows is a .cmd shim, which CreateProcess
+        # cannot exec directly — route it through cmd.exe /c.
+        *(
+            [os.environ.get("COMSPEC", "cmd.exe"), "/c", claude_bin]
+            if os.name == "nt" and claude_bin.lower().endswith((".cmd", ".bat"))
+            else [claude_bin]
+        ),
         "-p",
         "--input-format", "stream-json",
         "--output-format", "stream-json",
@@ -169,9 +175,13 @@ class Transport:
             "env": env,
         }
         if os.name == "nt":
+            # CREATE_NO_WINDOW, not DETACHED_PROCESS: a hidden console the
+            # claude process and its grandchildren inherit — DETACHED leaves
+            # the child console-less and any console grandchild pops a visible
+            # empty cmd window on the desktop.
             CREATE_NEW_PROCESS_GROUP = 0x00000200
-            DETACHED_PROCESS = 0x00000008
-            popen_kwargs["creationflags"] = CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+            CREATE_NO_WINDOW = 0x08000000
+            popen_kwargs["creationflags"] = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
         else:
             popen_kwargs["start_new_session"] = True
 

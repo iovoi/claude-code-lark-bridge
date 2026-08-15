@@ -280,6 +280,47 @@ def _venv_has_pkg(import_name: str) -> bool:
     return rc == 0
 
 
+def _path_append(cur: str, dirpath: str) -> str | None:
+    """Return the new user-PATH value with dirpath appended (Windows ';'-
+    separated), or None if it's already listed. Case-insensitive like Windows."""
+    parts = [p for p in cur.split(";") if p.strip()]
+    if any(os.path.normcase(p) == os.path.normcase(dirpath) for p in parts):
+        return None
+    parts.append(dirpath)
+    return ";".join(parts)
+
+
+def add_venv_to_user_path() -> None:
+    """Windows: put the venv's Scripts dir on the user PATH so `feishu-bridge`
+    works in new terminals. Uses winreg directly — `setx` truncates PATH at
+    1024 chars — and broadcasts WM_SETTINGCHANGE so new shells refresh env.
+    Existing terminals keep their PATH; the DONE banner tells the user to
+    open a new one. Idempotent; POSIX is a no-op."""
+    if os.name != "nt":
+        return
+    import winreg
+    scripts = str(VENV / "Scripts")
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
+                        winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE) as k:
+        try:
+            cur, typ = winreg.QueryValueEx(k, "Path")
+        except FileNotFoundError:
+            cur, typ = "", winreg.REG_EXPAND_SZ
+        new = _path_append(cur, scripts)
+        if new is None:
+            _step("venv Scripts already on user PATH")
+        else:
+            winreg.SetValueEx(k, "Path", 0, typ, new)
+            _step(f"added {scripts} to user PATH (takes effect in NEW terminals)")
+    try:  # best-effort: let running shells/Explorer know env changed
+        import ctypes
+        HWND_BROADCAST, WM_SETTINGCHANGE, SMTO_ABORTIFHUNG = 0xFFFF, 0x001A, 0x0002
+        ctypes.windll.user32.SendMessageTimeoutW(
+            HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment", SMTO_ABORTIFHUNG, 5000, None)
+    except OSError:
+        pass
+
+
 def make_venv() -> None:
     CHAT_BRIDGE.mkdir(parents=True, exist_ok=True)
     if not VENV.is_dir():
@@ -320,6 +361,7 @@ def make_venv() -> None:
             subprocess.run([uv, "pip", "install", "--python", venv_py, target], check=True)
         _done("bridge package + deps installed")
     _done(f"venv ready; feishu-bridge at {_venv_bin('feishu-bridge')}")
+    add_venv_to_user_path()
 
 
 def fetch_repo() -> None:
@@ -392,15 +434,36 @@ def _parse_env(path: Path) -> dict[str, str]:
     return out
 
 
-def _prompt(label: str, default: str, secret: bool) -> str:
-    """Read one value from stdin. Enter keeps the default; empty default => blank."""
+def _console() -> "object | None":
+    """A readable handle on the real console, or None if there isn't one.
+
+    With a piped install (``irm … | python``) stdin carries the script, not
+    the keyboard — but the terminal is still attached, so prompts can reach
+    it via CONIN$ (Windows) / /dev/tty (POSIX). Returns None when there is
+    no console at all (CI, scheduled runs), so callers can skip prompting."""
+    if sys.stdin.isatty():
+        return sys.stdin
+    try:
+        f = open("CONIN$" if os.name == "nt" else "/dev/tty", "r",
+                 encoding="utf-8", errors="replace")
+        if f.isatty():
+            return f
+        f.close()
+    except OSError:
+        pass
+    return None
+
+
+def _prompt(tty, label: str, default: str, secret: bool) -> str:
+    """Read one value from the console. Enter keeps the default; empty default => blank."""
     shown = f"  {label}"
     if default:
         shown += f" [{default}]" if not secret else f" [{'*' * 8}]"
     shown += ": "
+    print(shown, end="", flush=True)
     try:
-        raw = input(shown)
-    except EOFError:
+        raw = tty.readline()   # "" on EOF/Ctrl-Z; keeps defaults on interrupted input
+    except OSError:
         raw = ""
     val = raw.strip()
     if val:
@@ -411,17 +474,19 @@ def _prompt(label: str, default: str, secret: bool) -> str:
 def collect_credentials() -> None:
     """Interactively prompt for Feishu app credentials and write REPO/.env.
 
-    Skipped (leaving .env to be filled later) when:
-      * ``--no-creds`` is on the command line, or
-      * stdin isn't a TTY (e.g. ``curl | python`` install, CI).
+    Prompts on the real console even for piped installs (``irm … | python``):
+    stdin carries the script there, so _console() opens CONIN$/dev/tty to
+    reach the attached terminal. Skipped (leaving .env to be filled later)
+    when ``--no-creds`` is passed or no console exists (CI, scheduled runs).
 
     Existing values in .env are offered as defaults so a re-run only changes what
     you retype. .env is gitignored, so secrets never enter the repo."""
     if "--no-creds" in sys.argv[1:]:
         _step("skipping credential prompt (--no-creds); fill .env manually.")
         return
-    if not sys.stdin.isatty():
-        _step("non-interactive shell; skipping credential prompt. Fill .env later:")
+    tty = _console()
+    if tty is None:
+        _step("no interactive console; skipping credential prompt. Fill .env later:")
         _step(f"  edit {REPO / '.env'}  (FEISHU_APP_ID / FEISHU_APP_SECRET)")
         return
 
@@ -431,8 +496,12 @@ def collect_credentials() -> None:
     _step("Press Enter to keep the value in [brackets]; leave blank to skip/empty.")
     print()
     collected: dict[str, str] = {}
-    for key, label, secret in _ENV_KEYS:
-        collected[key] = _prompt(label, current.get(key, ""), secret)
+    try:
+        for key, label, secret in _ENV_KEYS:
+            collected[key] = _prompt(tty, label, current.get(key, ""), secret)
+    finally:
+        if tty is not sys.stdin:
+            tty.close()
     print()
 
     # Build the .env: a short header + the managed keys + any pre-existing extras.
@@ -480,6 +549,8 @@ def main() -> None:
     install_skill()
 
     rb = "run-bridge.sh" if os.name != "nt" else "run-bridge.bat"
+    note = ("\n  note: feishu-bridge is on PATH in NEW terminals only; "
+            "run-bridge.bat works in this one.") if os.name == "nt" else ""
     print("\n[install] ===========================================")
     print("[install] DONE.\n"
           f"  Repo:          {REPO}\n"
@@ -487,7 +558,7 @@ def main() -> None:
           f"  CLI:           {_venv_bin('feishu-bridge')}\n"
           f"  Skill:         {SKILL_DST}\n"
           f"  Creds:         {REPO}/.env\n"
-          f"  Start with:    {REPO}/{rb}   (or: feishu-bridge up)")
+          f"  Start with:    {REPO}/{rb}   (or: feishu-bridge up){note}")
 
 
 if __name__ == "__main__":

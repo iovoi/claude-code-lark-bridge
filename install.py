@@ -387,15 +387,36 @@ def _parse_env(path: Path) -> dict[str, str]:
     return out
 
 
-def _prompt(label: str, default: str, secret: bool) -> str:
-    """Read one value from stdin. Enter keeps the default; empty default => blank."""
+def _console() -> "object | None":
+    """A readable handle on the real console, or None if there isn't one.
+
+    With a piped install (``irm … | python``) stdin carries the script, not
+    the keyboard — but the terminal is still attached, so prompts can reach
+    it via CONIN$ (Windows) / /dev/tty (POSIX). Returns None when there is
+    no console at all (CI, scheduled runs), so callers can skip prompting."""
+    if sys.stdin.isatty():
+        return sys.stdin
+    try:
+        f = open("CONIN$" if os.name == "nt" else "/dev/tty", "r",
+                 encoding="utf-8", errors="replace")
+        if f.isatty():
+            return f
+        f.close()
+    except OSError:
+        pass
+    return None
+
+
+def _prompt(tty, label: str, default: str, secret: bool) -> str:
+    """Read one value from the console. Enter keeps the default; empty default => blank."""
     shown = f"  {label}"
     if default:
         shown += f" [{default}]" if not secret else f" [{'*' * 8}]"
     shown += ": "
+    print(shown, end="", flush=True)
     try:
-        raw = input(shown)
-    except EOFError:
+        raw = tty.readline()   # "" on EOF/Ctrl-Z; keeps defaults on interrupted input
+    except OSError:
         raw = ""
     val = raw.strip()
     if val:
@@ -406,17 +427,19 @@ def _prompt(label: str, default: str, secret: bool) -> str:
 def collect_credentials() -> None:
     """Interactively prompt for Feishu app credentials and write REPO/.env.
 
-    Skipped (leaving .env to be filled later) when:
-      * ``--no-creds`` is on the command line, or
-      * stdin isn't a TTY (e.g. ``curl | python`` install, CI).
+    Prompts on the real console even for piped installs (``irm … | python``):
+    stdin carries the script there, so _console() opens CONIN$/dev/tty to
+    reach the attached terminal. Skipped (leaving .env to be filled later)
+    when ``--no-creds`` is passed or no console exists (CI, scheduled runs).
 
     Existing values in .env are offered as defaults so a re-run only changes what
     you retype. .env is gitignored, so secrets never enter the repo."""
     if "--no-creds" in sys.argv[1:]:
         _step("skipping credential prompt (--no-creds); fill .env manually.")
         return
-    if not sys.stdin.isatty():
-        _step("non-interactive shell; skipping credential prompt. Fill .env later:")
+    tty = _console()
+    if tty is None:
+        _step("no interactive console; skipping credential prompt. Fill .env later:")
         _step(f"  edit {REPO / '.env'}  (FEISHU_APP_ID / FEISHU_APP_SECRET)")
         return
 
@@ -426,8 +449,12 @@ def collect_credentials() -> None:
     _step("Press Enter to keep the value in [brackets]; leave blank to skip/empty.")
     print()
     collected: dict[str, str] = {}
-    for key, label, secret in _ENV_KEYS:
-        collected[key] = _prompt(label, current.get(key, ""), secret)
+    try:
+        for key, label, secret in _ENV_KEYS:
+            collected[key] = _prompt(tty, label, current.get(key, ""), secret)
+    finally:
+        if tty is not sys.stdin:
+            tty.close()
     print()
 
     # Build the .env: a short header + the managed keys + any pre-existing extras.

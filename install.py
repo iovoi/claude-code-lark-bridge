@@ -199,23 +199,48 @@ def _offer_python_upgrade() -> str | None:
 
 
 def _relaunch_under(exe: str) -> "NoReturn":  # noqa: F821
-    """Re-exec this installer under `exe` (preserves argv). Handles the piped
-    (`irm … | python`) case, where __file__ is '<stdin>' — resolving that
-    path raises WinError 123 on Windows (illegal '<'/'>') and there's no
-    file to re-exec anyway; fetch the installer source instead and run it
-    via -c."""
+    """Run this installer under `exe` (preserves argv) and exit with its code.
+
+    Uses subprocess rather than os.execv: on Windows, execv does not quote
+    arguments (the CRT joins them raw), so passing the script source via -c
+    yields a mangled command line and the child dies silently — and the
+    target is often a Store-Python app-execution-alias stub with its own
+    exec quirks. subprocess.call quotes correctly and keeps console output
+    attached.
+
+    Handles the piped (`irm … | python`) case, where __file__ is '<stdin>' —
+    resolving that path raises WinError 123 on Windows (illegal '<'/'>') and
+    there's no file to re-run anyway; fetch the installer source from the
+    repo into a temp file instead."""
     _step(f"re-launching installer under {exe}")
-    if Path(__file__).is_file():
-        os.execv(exe, [exe, str(Path(__file__).resolve())] + sys.argv[1:])
-    url = f"{REPO_URL}/raw/{REPO_REF}/install.py"
-    _step(f"piped install (no script file); fetching {url}")
+    argv = sys.argv[1:]
+    tmp_path: str | None = None
     try:
-        src = urllib.request.urlopen(url, timeout=30).read().decode()
-    except OSError as e:
-        _die(f"could not fetch {url} to re-exec under {exe}: {e}. "
-             "Download install.py to a file and re-run: "
-             "irm <url> -OutFile install.py; python install.py")
-    os.execv(exe, [exe, "-c", src] + sys.argv[1:])
+        script = Path(__file__)
+        if script.is_file():
+            target = str(script.resolve())
+        else:
+            url = f"{REPO_URL}/raw/{REPO_REF}/install.py"
+            _step(f"piped install (no script file); fetching {url}")
+            try:
+                src = urllib.request.urlopen(url, timeout=30).read()
+            except OSError as e:
+                _die(f"could not fetch {url} to re-run under {exe}: {e}. "
+                     "Download install.py to a file and re-run: "
+                     "irm <url> -OutFile install.py; python install.py")
+            with tempfile.NamedTemporaryFile("wb", suffix=".py", prefix="chat-bridge-install-",
+                                             delete=False) as tmp:
+                tmp.write(src)
+            tmp_path = tmp.name
+            target = tmp_path
+        rc = subprocess.call([exe, target] + argv)
+        sys.exit(rc)
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def _platform_note() -> None:

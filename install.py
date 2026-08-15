@@ -161,6 +161,63 @@ def _bootstrap_python() -> str | None:
     return None
 
 
+def _print_upgrade_help() -> None:
+    """Show the ways to get a Python >=3.10 when none was found on the machine."""
+    print(
+        "\n[install] Python >=3.10 is required; none was found on this machine.\n"
+        "Approaches to upgrade:\n"
+        "\n"
+        "  1. winget (Windows):     winget install --id Python.Python.3.12 -e\n"
+        "  2. python.org (any OS):  https://www.python.org/downloads/ — in the\n"
+        "     installer, tick \"Add python.exe to PATH\"\n"
+        "  3. Microsoft Store:      search \"Python 3.12\", click Install\n"
+        "  4. uv (any OS):          uv python install 3.12\n"
+        "\n"
+        "Note: a new Python installs side-by-side (the old one is not removed).\n"
+        "If `python --version` still reports the old version afterwards, check\n"
+        "`where python`, disable the old Store alias (Settings > Apps > Advanced\n"
+        "app settings > App execution aliases), or invoke the new interpreter\n"
+        "explicitly:  py -3.12 install.py\n",
+        flush=True)
+
+
+def _offer_python_upgrade() -> str | None:
+    """No Python >=3.10 found — show the upgrade approaches and (when the
+    terminal is interactive) ask before auto-installing. Piped/non-interactive
+    runs can't prompt, so they attempt the best-effort bootstrap directly."""
+    _print_upgrade_help()
+    if sys.stdin.isatty():
+        try:
+            ans = input("[install] Try to install Python 3.12 automatically now "
+                        "(winget/uv)? [Y/n] ")
+        except EOFError:
+            ans = ""
+        if ans.strip().lower() in ("n", "no"):
+            _die("declined automatic Python install. Upgrade manually "
+                 "(approaches above), then re-run the installer.")
+    return _bootstrap_python()
+
+
+def _relaunch_under(exe: str) -> "NoReturn":  # noqa: F821
+    """Re-exec this installer under `exe` (preserves argv). Handles the piped
+    (`irm … | python`) case, where __file__ is '<stdin>' — resolving that
+    path raises WinError 123 on Windows (illegal '<'/'>') and there's no
+    file to re-exec anyway; fetch the installer source instead and run it
+    via -c."""
+    _step(f"re-launching installer under {exe}")
+    if Path(__file__).is_file():
+        os.execv(exe, [exe, str(Path(__file__).resolve())] + sys.argv[1:])
+    url = f"{REPO_URL}/raw/{REPO_REF}/install.py"
+    _step(f"piped install (no script file); fetching {url}")
+    try:
+        src = urllib.request.urlopen(url, timeout=30).read().decode()
+    except OSError as e:
+        _die(f"could not fetch {url} to re-exec under {exe}: {e}. "
+             "Download install.py to a file and re-run: "
+             "irm <url> -OutFile install.py; python install.py")
+    os.execv(exe, [exe, "-c", src] + sys.argv[1:])
+
+
 def _platform_note() -> None:
     """The bridge is uniformly cross-platform (streaming print/pipe mode — no PTY/tmux),
     so there is no longer a native-Windows caveat. Print a short confirmation."""
@@ -171,14 +228,16 @@ def _platform_note() -> None:
 def preflight() -> None:
     if sys.version_info < (3, 10):
         _step(f"this Python is {platform.python_version()} (<3.10); looking for a newer one …")
-        exe = _find_python_ge310() or _bootstrap_python()
-        if not exe:
-            _die("Python >=3.10 required. None found and auto-install failed. "
-                 "Install Python 3.10+ (winget install --id Python.Python.3.12, or "
-                 "https://python.org) and re-run.")
-        _step(f"re-launching installer under {exe}")
-        # Re-exec this script under the suitable interpreter (preserves argv).
-        os.execv(exe, [exe, str(Path(__file__).resolve())] + sys.argv[1:])
+        exe = _find_python_ge310()
+        if exe:
+            _relaunch_under(exe)
+        # None found: show the upgrade approaches, then prompt/attempt an
+        # automatic install before giving up.
+        exe = _offer_python_upgrade()
+        if exe:
+            _relaunch_under(exe)
+        _die("Python >=3.10 required. None found and the automatic upgrade did not "
+             "complete — upgrade manually (approaches above), then re-run.")
     if not _bin("claude"):
         _die("Claude Code (`claude`) not found on PATH. Install it (https://docs.anthropic.com/claude-code) and re-run.")
     _step(f"python {platform.python_version()} OK; claude found.")

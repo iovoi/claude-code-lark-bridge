@@ -89,7 +89,12 @@ def up() -> int:
         "close_fds": True,
     }
     if os.name == "nt":
-        popen_kwargs["creationflags"] = 0x00000200 | 0x00000008  # NEW_PROCESS_GROUP | DETACHED
+        # CREATE_NO_WINDOW (not DETACHED_PROCESS): the child gets a *hidden*
+        # console its own grandchildren inherit. DETACHED leaves the daemon
+        # console-less, so any console-subsystem grandchild it spawns makes
+        # Windows allocate a brand-new VISIBLE console — an empty cmd window
+        # pops up on the user's desktop.
+        popen_kwargs["creationflags"] = 0x00000200 | 0x08000000  # NEW_PROCESS_GROUP | NO_WINDOW
     else:
         popen_kwargs["start_new_session"] = True
 

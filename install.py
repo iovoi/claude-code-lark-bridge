@@ -309,10 +309,15 @@ def make_venv() -> None:
         _step("installing bridge package + deps via uv (faster than pip) …")
         # uv pip resolves + installs in seconds vs pip's minutes; -e editable so
         # `git pull` of the repo is reflected without reinstall. Fall back to pip.
-        rc = subprocess.run([uv, "pip", "install", "-e", target], check=False).returncode
+        # --python: uv only auto-discovers VIRTUAL_ENV or a ./.venv near the cwd —
+        # our venv lives at an arbitrary path (~/.chat_bridge/venv), so point uv
+        # at its interpreter explicitly.
+        venv_py = _venv_bin("python")
+        rc = subprocess.run([uv, "pip", "install", "--python", venv_py, "-e", target],
+                            check=False).returncode
         if rc != 0:
             # editable may fail on some setups; fall back to a plain path install.
-            subprocess.run([uv, "pip", "install", target], check=True)
+            subprocess.run([uv, "pip", "install", "--python", venv_py, target], check=True)
         _done("bridge package + deps installed")
     _done(f"venv ready; feishu-bridge at {_venv_bin('feishu-bridge')}")
 

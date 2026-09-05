@@ -290,14 +290,64 @@ def _path_append(cur: str, dirpath: str) -> str | None:
     return ";".join(parts)
 
 
-def add_venv_to_user_path() -> None:
-    """Windows: put the venv's Scripts dir on the user PATH so `feishu-bridge`
-    works in new terminals. Uses winreg directly — `setx` truncates PATH at
-    1024 chars — and broadcasts WM_SETTINGCHANGE so new shells refresh env.
-    Existing terminals keep their PATH; the DONE banner tells the user to
-    open a new one. Idempotent; POSIX is a no-op."""
+def _posix_put_cli_on_path() -> str:
+    """POSIX: make `feishu-bridge` callable by name. Symlinks the CLI into
+    ~/.local/bin — the XDG user bin most distros/WSL already put on PATH —
+    and, when that dir is not on PATH, appends a marked export line to the
+    shell rc (first existing of .bashrc/.zshrc/.profile) so new terminals
+    pick it up. Idempotent; never clobbers a file it didn't create. Returns
+    a DONE-banner note ('' when the CLI works right away)."""
+    cli = Path(_venv_bin("feishu-bridge"))
+    if not cli.is_file():
+        return ""  # nothing installed yet; make_venv checkpoints handle re-runs
+    user_bin = Path.home() / ".local" / "bin"
+    link = user_bin / "feishu-bridge"
+    linked = False
+    if link.is_symlink() and Path(os.path.realpath(link)) == cli.resolve():
+        _step("feishu-bridge already linked in ~/.local/bin")
+        linked = True
+    elif link.exists() and not link.is_symlink():
+        _step(f"~/.local/bin/feishu-bridge exists and is not our symlink; leaving it")
+    else:
+        user_bin.mkdir(parents=True, exist_ok=True)
+        link.unlink(missing_ok=True)
+        link.symlink_to(cli)
+        _step(f"linked {link} -> {cli}")
+        linked = True
+    path_dirs = [Path(p) for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    if user_bin in path_dirs or not linked:
+        return ""  # usable in new terminals already (or we couldn't link)
+    marker = "# added by feishu-bridge install.py"
+    export = f'export PATH="{user_bin}:$PATH"  {marker}'
+    rc = next((p for p in ("~/.bashrc", "~/.zshrc", "~/.profile")
+               if Path(p).expanduser().is_file()), None)
+    if rc is None:
+        rc = "~/.profile"
+    rc_path = Path(rc).expanduser()
+    text = rc_path.read_text(encoding="utf-8") if rc_path.is_file() else ""
+    if marker in text:
+        _step(f"PATH export for ~/.local/bin already in {rc}")
+    else:
+        with rc_path.open("a", encoding="utf-8") as f:
+            f.write(f"\n{export}\n")
+        _step(f"added PATH export for ~/.local/bin to {rc}")
+    return ("\n  note: ~/.local/bin was not on PATH; the export added to "
+            f"{rc} applies to NEW shells.")
+
+
+def add_venv_to_user_path() -> str:
+    """Put `feishu-bridge` on the user's PATH so it works in new terminals.
+
+    Windows: adds the venv's Scripts dir to the user PATH. Uses winreg
+    directly — `setx` truncates PATH at 1024 chars — and broadcasts
+    WM_SETTINGCHANGE so new shells refresh env. Existing terminals keep
+    their PATH; the DONE banner tells the user to open a new one.
+    Idempotent.
+
+    POSIX: symlink into ~/.local/bin (see _posix_put_cli_on_path). Returns
+    a DONE-banner note ('' when nothing needs mentioning)."""
     if os.name != "nt":
-        return
+        return _posix_put_cli_on_path()
     import winreg
     scripts = str(VENV / "Scripts")
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
@@ -319,6 +369,7 @@ def add_venv_to_user_path() -> None:
             HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment", SMTO_ABORTIFHUNG, 5000, None)
     except OSError:
         pass
+    return ""
 
 
 def make_venv() -> None:
@@ -361,7 +412,6 @@ def make_venv() -> None:
             subprocess.run([uv, "pip", "install", "--python", venv_py, target], check=True)
         _done("bridge package + deps installed")
     _done(f"venv ready; feishu-bridge at {_venv_bin('feishu-bridge')}")
-    add_venv_to_user_path()
 
 
 def fetch_repo() -> None:
@@ -541,6 +591,7 @@ def main() -> None:
 
     _phase("Create venv + install dependencies")
     make_venv()
+    path_note = add_venv_to_user_path()
 
     _phase("Feishu app credentials")
     collect_credentials()
@@ -549,8 +600,9 @@ def main() -> None:
     install_skill()
 
     rb = "run-bridge.sh" if os.name != "nt" else "run-bridge.bat"
-    note = ("\n  note: feishu-bridge is on PATH in NEW terminals only; "
-            "run-bridge.bat works in this one.") if os.name == "nt" else ""
+    note = path_note or (
+        "\n  note: feishu-bridge is on PATH in NEW terminals only; "
+        "run-bridge.bat works in this one." if os.name == "nt" else "")
     print("\n[install] ===========================================")
     print("[install] DONE.\n"
           f"  Repo:          {REPO}\n"

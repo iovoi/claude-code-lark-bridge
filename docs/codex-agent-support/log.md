@@ -18,6 +18,17 @@ Copy the template below, fill it in, and insert it at the top of "Entries".
 
 ## Entries
 
+### 2026-09-06 23:05 — Parity matrix added to the PRD
+- **Task:** T4.4 (docs)
+- **What happened:** user asked to confirm codex support is feature-identical
+  to claude. It is not (approval cards, cost display, interrupt mechanism,
+  permission semantics differ); user asked for the differences to be
+  documented in the feature docs.
+- **Resolution:** added PRD §8 "Backend parity: claude vs codex" (identical
+  shared-runtime list + difference matrix + a possible read-only→escalation-
+  card follow-up), pointer from §2 non-goals; renumbered Open questions to §9.
+- **PRD impact:** amended (§2 pointer, new §8, §8→§9).
+
 ### 2026-09-06 22:40 — Live bug: silent empty turn on cross-agent resume (fixed)
 - **Task:** T4.3 (first live turn through the bridge)
 - **What happened:** user's first codex turn over Feishu returned only the Done

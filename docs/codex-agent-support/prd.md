@@ -2,7 +2,7 @@
 
 - **Status:** Complete (live codex smoke test pending — see §8 / log)
 - **Feature dir:** `docs/codex-agent-support/`
-- **Created:** 2026-09-06 · **Last updated:** 2026-09-06
+- **Created:** 2026-09-06 · **Last updated:** 2026-09-06 (§8 parity matrix added)
 - **Branch:** `feat/codex-agent-support` · **PR:** #19
 
 ## 0. Resume protocol
@@ -37,6 +37,7 @@ makes the backend pluggable — `claude` (default, unchanged behavior) or `codex
   - Approval cards for codex — `codex exec` has no interactive approval
     round-trip; the sandbox policy is the safety boundary. Cards remain
     claude-only (possible follow-up if codex grows a control protocol).
+    See §8 for the full claude-vs-codex parity matrix.
   - Any UI/config surface beyond the four env keys, the CLI flag, and the
     installer prompt.
   - Running multiple agents simultaneously or per-chat agent switching.
@@ -221,7 +222,35 @@ Tool result `is_error` = `status ∉ {None, "completed", "success"}` or
 - Installer manual check: `python3 install.py --agent bogus` exits 1 with the
   exact error; `--agent codex` passes preflight when codex is on PATH.
 
-## 8. Open questions
+## 8. Backend parity: claude vs codex
+
+The chat-side UX and runtime orchestration are **shared and identical** for both
+backends (one runtime; only the adapter differs). The user-facing feature set,
+however, is **not** a pure drop-in — three real differences exist:
+
+**Identical (shared runtime, zero behavioral difference):** message ingestion
+(Feishu websocket, allowlist, stale filtering); single-flight turns (busy →
+"send /stop" hint); OnIt→Done emoji cycle; deferred 10s "Working…" progress
+card with periodic refresh (tool list/status on the card); card-button actions
+(stop); reply-based approval parsing (approve/all/deny/stop text replies —
+note: only meaningful when an approval flow exists, i.e. claude); session
+persistence + resume across restarts (claude: session-id, codex: thread-id;
+per-scope, agent-gated so backends never resume each other's sessions); stuck
+watchdog (`FEISHU_STUCK_TIMEOUT`); `/stop` interruption; final answer delivered
+as a bot text message.
+
+| Capability | claude backend | codex backend |
+|---|---|---|
+| Tool approval cards (risky tools pause and ask in chat) | ✅ full `can_use_tool` round-trip: Approve / Approve-all(turn) / Deny / Deny+stop cards, `FEISHU_AUTO_APPROVE_TOOLS` allowlist, `FEISHU_APPROVAL_TIMEOUT` auto-deny | ❌ `codex exec` has no interactive approval channel — the **sandbox** (`FEISHU_CODEX_SANDBOX`, default `workspace-write`) is the safety boundary: out-of-policy actions fail inside the sandbox instead of prompting the user |
+| Cost display on the done card | ✅ 💰 $x.xxxx (claude reports `total_cost_usd`) | ❌ codex reports token usage only (`turn.completed.usage`), no cost figure |
+| Turn interruption mechanism | graceful (control-protocol `interrupt`) | process-tree kill (same UX, less graceful) |
+| Permission semantics | `FEISHU_DEFAULT_PERMISSION_MODE` / `--dangerously-skip-permissions` | sandbox tier: `read-only` / `workspace-write` (≈ writable workdir, no network) / `danger-full-access` |
+
+**Possible follow-up** (not committed): approximate approval cards for codex by
+defaulting to `read-only` sandbox and offering an "escalate this turn to
+workspace-write and retry" card when a command fails the sandbox policy.
+
+## 9. Open questions
 - None blocking. One pending verification: live codex turn over the bridge
   (blocked on `codex login` in WSL — see log). If `item.*` field names differ
   in practice (e.g. `output` vs `aggregated_output`), the mapper already

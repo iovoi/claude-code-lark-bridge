@@ -18,6 +18,40 @@ Copy the template below, fill it in, and insert it at the top of "Entries".
 
 ## Entries
 
+### 2026-09-06 22:40 — Live bug: silent empty turn on cross-agent resume (fixed)
+- **Task:** T4.3 (first live turn through the bridge)
+- **What happened:** user's first codex turn over Feishu returned only the Done
+  emoji, `answer_len=0`. Log showed `start: '你是什么模型?' → done; tools=[]`.
+- **Discovery / blocker:** `sessions.json` had no notion of which backend a
+  session id belongs to; scope passed the stored **claude** session UUID to
+  CodexAdapter → `codex exec resume <claude-uuid>` fails on stderr
+  (`thread/resume: no rollout found for thread id …`) with empty stdout, and
+  codex's stderr was never captured (scope passed no `stderr_sink`), so the
+  failure was invisible.
+- **Resolution / workaround:** three-part fix — (1) `session_store` is now
+  agent-aware (`get/set_session_id(…, agent=…)`, legacy entries = claude); (2)
+  scope wires an append-mode `~/.chat_bridge/agent-stderr.log` sink into every
+  adapter; (3) CodexAdapter always drains stderr into a bounded 8 KB tail and,
+  on non-zero exit (or zero output), emits `ErrorEvent("codex exited (rc=N):
+  <tail>")` + `DoneEvent(reason="error")` instead of a silent empty turn.
+- **PRD impact:** amended §4.3 (error surfacing) and §4.5 (session_store
+  signatures); 3 new regression tests, suite 50 passed.
+
+### 2026-09-06 22:20 — Windows codex.exe chosen as the backend binary
+- **Task:** T4.3
+- **What happened:** user directed us to use the Windows-installed codex CLI
+  (logged in) instead of WSL codex (whose auth is revoked server-side).
+- **Discovery / blocker:** Windows exe via WSL interop works incl. stdin/JSON
+  streaming, but needs a Windows-visible cwd — the default WSL-side workdir
+  can't be a Windows process cwd.
+- **Resolution / workaround:** `FEISHU_CODEX_BIN=/mnt/c/Users/wade/AppData/
+  Local/Programs/OpenAI/Codex/bin/codex.exe`, `FEISHU_WORKDIR=/mnt/c/Users/
+  wade/Desktop/workspace` in the installed copy's `.env`; live probe returned
+  pong with correct event shapes (this also live-verified the `item.*`
+  payloads).
+- **PRD impact:** §8's pending item partially closed (live smoke of a real
+  turn through the bridge done; approval-card caveat unchanged).
+
 ### 2026-09-06 21:55 — Docs backfilled (formal-feature applied retroactively)
 - **Task:** planning
 - **What happened:** user asked whether the formal-feature skill had been used;

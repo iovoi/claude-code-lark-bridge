@@ -168,14 +168,14 @@ class FakeStdin:
 
 
 class FakeProc:
-    def __init__(self, lines) -> None:
+    def __init__(self, lines, rc: int = 0) -> None:
         self.stdin = FakeStdin()
         self.stdout = FakeStdout(lines)
         self.stderr = None
-        self.returncode = 0
+        self.returncode = rc
 
     async def wait(self):
-        return 0
+        return self.returncode
 
 
 def test_run_turn_maps_stream_and_resumes(monkeypatch):
@@ -222,3 +222,57 @@ def test_run_turn_maps_stream_and_resumes(monkeypatch):
     assert ad._resume == "th-9"
     kinds = [type(e).__name__ for e in events]
     assert "TextEvent" in kinds and "DoneEvent" in kinds
+
+
+def test_run_turn_failed_exit_surfaces_error(monkeypatch):
+    """codex dies on stderr with empty stdout (e.g. bad resume id) -> ErrorEvent,
+    not a silent empty turn (the Done-emoji-only bug)."""
+    async def _ok(proc):
+        return proc
+
+    monkeypatch.setattr(
+        "bridge.agent.codex_adapter.asyncio.create_subprocess_exec",
+        lambda *a, **k: _ok(FakeProc([], rc=1)),
+    )
+    ad = CodexAdapter(_cfg(agent="codex"))
+    events = []
+
+    async def emit(evt):
+        events.append(evt)
+
+    info = asyncio.run(ad.run_turn("hello", emit))
+    assert info["exit_code"] == 1
+    kinds = [type(e).__name__ for e in events]
+    assert "ErrorEvent" in kinds
+    assert events[-1].reason == "error"
+    err = next(e for e in events if type(e).__name__ == "ErrorEvent")
+    assert "rc=1" in err.message
+
+
+# ---- agent-aware session store --------------------------------------------------
+
+def test_session_store_gates_by_agent(tmp_path, monkeypatch):
+    from bridge import session_store
+
+    f = tmp_path / "sessions.json"
+    monkeypatch.setattr(session_store, "_SESSIONS_FILE", f)
+    session_store.set_session_id("s1", "codex-thread-1", "/w", agent="codex")
+    assert session_store.get_session_id("s1", agent="codex") == "codex-thread-1"
+    assert session_store.get_session_id("s1", agent="claude") is None  # other backend: no resume
+
+    session_store.set_session_id("s1", "claude-sess-1", "/w")  # default agent=claude
+    assert session_store.get_session_id("s1", agent="claude") == "claude-sess-1"
+    assert session_store.get_session_id("s1", agent="codex") is None
+
+
+def test_session_store_legacy_entry_is_claude(tmp_path, monkeypatch):
+    """Entries written before the agent field existed are claude sessions."""
+    from bridge import session_store
+
+    f = tmp_path / "sessions.json"
+    f.write_text('{"s1": {"session_id": "541ae274-9d7f", "cwd": "/w", '
+                  '"updated_at": "2026-09-06T00:00:00+00:00"}}')
+    monkeypatch.setattr(session_store, "_SESSIONS_FILE", f)
+    assert session_store.get_session_id("s1") == "541ae274-9d7f"
+    assert session_store.get_session_id("s1", agent="claude") == "541ae274-9d7f"
+    assert session_store.get_session_id("s1", agent="codex") is None

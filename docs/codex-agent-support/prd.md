@@ -110,6 +110,14 @@ makes the backend pluggable — `claude` (default, unchanged behavior) or `codex
   5. On EOF without a terminal event, emit `DoneEvent(reason="eof")`.
   6. First turn: capture thread id from `thread.started`; subsequent turns of
      the same scope pass it as `resume` (adapter stores it in `self._resume`).
+- stderr is always drained into a bounded 8 KB tail (+ the scope's sink,
+  `~/.chat_bridge/agent-stderr.log`); if the process exits non-zero or emits
+  no events, an `ErrorEvent("codex exited (rc=N): <stderr tail>")` +
+  `DoneEvent(reason="error")` are emitted — never a silent empty turn.
+- Sessions are stored per backend: `session_store.get/set_session_id(…,
+  agent=…)` only resume an id created by the *same* agent (legacy entries
+  without an `agent` field are claude's). A claude UUID is never passed to
+  codex (which would fail `thread/resume: no rollout found`).
 - `interrupt()`/`stop()`: no control protocol — terminate the in-flight
   process tree (Windows `_taskkill(pid, force=True)`; POSIX
   `os.killpg(os.getpgid(pid), SIGKILL)` with single-proc fallback).
@@ -142,6 +150,9 @@ Tool result `is_error` = `status ∉ {None, "completed", "success"}` or
 - `bridge/agent/__init__.py`:
   `make_adapter(cfg, *, resume: str|None = None, approval_callback: ApprovalCallback|None = None, stderr_sink=None) -> AgentAdapter`
   — dispatches on `cfg.agent == "codex"` (lazy import) else claude.
+- `bridge/session_store.py`:
+  - `get_session_id(scope: str, agent: str = "claude") -> str|None`
+  - `set_session_id(scope: str, session_id: str, cwd: str, agent: str = "claude") -> None`
 - `bridge/agent/codex_adapter.py`:
   - `_build_codex_argv(codex_bin: str, *, sandbox: str, extra_args: list[str], resume: str|None) -> list[str]`
   - `_map_event(evt: dict, session_id_ref: dict) -> tuple[list, bool]` (events, turn_done?)

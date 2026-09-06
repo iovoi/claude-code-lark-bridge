@@ -200,6 +200,7 @@ class CodexAdapter:
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._stderr_task: Optional[asyncio.Task] = None
         self._stderr_sink = stderr_sink
+        self._stderr_buf = bytearray()  # bounded tail of codex stderr (error reporting)
         self._started = False
 
     @property
@@ -231,7 +232,10 @@ class CodexAdapter:
             popen_kwargs["start_new_session"] = True
 
         self._proc = await asyncio.create_subprocess_exec(*argv, **popen_kwargs)
-        if self._stderr_sink is not None:
+        self._stderr_buf = bytearray()
+        if self._proc.stderr is not None:
+            # Always drain (buffer + optional sink): a full stderr pipe would
+            # deadlock codex, and the tail is how failures get reported.
             self._stderr_task = asyncio.create_task(self._drain_stderr())
         # The prompt rides on stdin ("-" argv), then EOF so codex starts the turn.
         self._proc.stdin.write((prompt + "\n").encode("utf-8"))
@@ -240,6 +244,7 @@ class CodexAdapter:
 
         result_info: dict[str, Any] = {"session_id": self.session_id}
         done = False
+        emitted = False
         while not done:
             raw = await self._proc.stdout.readline()
             if not raw:
@@ -255,13 +260,22 @@ class CodexAdapter:
                 on_frame()  # heartbeat per event (covers long command executions)
             events, done = _map_event(evt, self._session_id_ref)
             for agent_evt in events:
+                emitted = True
                 await emit(agent_evt)
+        rc = await self._proc.wait()
+        if not done and (rc != 0 or not emitted):
+            # codex died before finishing (e.g. bad resume id, auth failure):
+            # surface it instead of a silent empty turn (Done-emoji-only bug).
+            tail = bytes(self._stderr_buf[-500:]).decode("utf-8", "replace").strip()
+            msg = f"codex exited (rc={rc})"
+            if tail:
+                msg += f": {tail}"
+            await emit(ErrorEvent(message=msg))
         if not done:
-            await emit(DoneEvent(session_id=self.session_id, reason="eof"))
+            await emit(DoneEvent(session_id=self.session_id, reason="error" if rc != 0 else "eof"))
         if self._resume is None and self.session_id:
             # later turns resume this thread
             self._resume = self.session_id
-        rc = await self._proc.wait()
         result_info.update(session_id=self.session_id, exit_code=rc)
         return result_info
 
@@ -291,16 +305,20 @@ class CodexAdapter:
         self._started = False
 
     async def _drain_stderr(self) -> None:
-        assert self._proc is not None and self._stderr_sink is not None
+        assert self._proc is not None and self._proc.stderr is not None
         try:
             while True:
                 chunk = await self._proc.stderr.read(4096)
                 if not chunk:
                     break
-                try:
-                    self._stderr_sink.write(chunk.decode("utf-8", "replace"))
-                    self._stderr_sink.flush()
-                except Exception:
-                    pass
+                self._stderr_buf += chunk
+                if len(self._stderr_buf) > 8192:  # keep only the tail
+                    del self._stderr_buf[:-8192]
+                if self._stderr_sink is not None:
+                    try:
+                        self._stderr_sink.write(chunk.decode("utf-8", "replace"))
+                        self._stderr_sink.flush()
+                    except Exception:
+                        pass
         except (asyncio.CancelledError, RuntimeError):
             pass

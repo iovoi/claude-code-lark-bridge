@@ -34,6 +34,9 @@ REPO = CHAT_BRIDGE / DIR_NAME
 SKILL_SRC = "skills/feishu-bridge/SKILL.md"          # relative to repo
 SKILL_DST = Path.home() / ".claude" / "skills" / "feishu-bridge" / "SKILL.md"
 
+# Coding-agent backend chosen in preflight ("claude" default; "codex" supported).
+_AGENT = "claude"
+
 
 def _bin(name: str) -> str | None:
     return shutil.which(name)
@@ -250,6 +253,41 @@ def _platform_note() -> None:
           flush=True)
 
 
+def _select_agent() -> str:
+    """Which coding-agent CLI backs the bridge: "claude" or "codex".
+
+    Precedence: --agent CLI arg, FEISHU_AGENT env, interactive prompt (default
+    keeps the value already in .env, else claude), claude. Non-interactive runs
+    never block on the prompt."""
+    global _AGENT
+    argv = sys.argv[1:]
+    if "--agent" in argv and argv.index("--agent") + 1 < len(argv):
+        _AGENT = argv[argv.index("--agent") + 1].strip().lower()
+        return _validate_agent(_AGENT)
+    if os.environ.get("FEISHU_AGENT", "").strip():
+        _AGENT = os.environ["FEISHU_AGENT"].strip().lower()
+        return _validate_agent(_AGENT)
+    tty = _console()
+    if tty is not None:
+        current = _parse_env(REPO / ".env").get("FEISHU_AGENT", "")
+        default = current.strip().lower() if current.strip().lower() in ("claude", "codex") else "claude"
+        print("\n[install] Coding agent: which CLI should the bridge drive?")
+        val = _prompt(tty, "  Agent [claude/codex]", default, False).strip().lower()
+        if tty is not sys.stdin:
+            tty.close()
+        if val in ("claude", "codex"):
+            _AGENT = val
+        else:
+            _step(f"unrecognized agent {val!r}; using {_AGENT}")
+    return _AGENT
+
+
+def _validate_agent(agent: str) -> str:
+    if agent not in ("claude", "codex"):
+        _die(f"unknown agent {agent!r} (expected: claude or codex)")
+    return agent
+
+
 def preflight() -> None:
     if sys.version_info < (3, 10):
         _step(f"this Python is {platform.python_version()} (<3.10); looking for a newer one …")
@@ -263,9 +301,16 @@ def preflight() -> None:
             _relaunch_under(exe)
         _die("Python >=3.10 required. None found and the automatic upgrade did not "
              "complete — upgrade manually (approaches above), then re-run.")
-    if not _bin("claude"):
-        _die("Claude Code (`claude`) not found on PATH. Install it (https://docs.anthropic.com/claude-code) and re-run.")
-    _step(f"python {platform.python_version()} OK; claude found.")
+    agent = _select_agent()
+    if agent == "codex":
+        if not _bin("codex"):
+            _die("codex CLI not found on PATH. Install it (https://github.com/openai/codex) and re-run, "
+                 "or choose claude instead.")
+        _step(f"python {platform.python_version()} OK; codex found.")
+    else:
+        if not _bin("claude"):
+            _die("Claude Code (`claude`) not found on PATH. Install it (https://docs.anthropic.com/claude-code) and re-run.")
+        _step(f"python {platform.python_version()} OK; claude found.")
 
 
 def _venv_has_pkg(import_name: str) -> bool:
@@ -521,6 +566,22 @@ def _prompt(tty, label: str, default: str, secret: bool) -> str:
     return default  # empty input keeps the existing/default value
 
 
+def _persist_agent_only() -> None:
+    """Write FEISHU_AGENT into .env even when the credential prompt was skipped
+    (so a --no-creds / non-interactive install still records the agent choice)."""
+    if _AGENT == "claude" and not _parse_env(REPO / ".env").get("FEISHU_AGENT"):
+        return  # claude is the config default; don't touch .env unnecessarily
+    env_file = REPO / ".env"
+    current = _parse_env(env_file)
+    if current.get("FEISHU_AGENT") == _AGENT:
+        return
+    lines = [f"{k}={v}" for k, v in current.items() if v and k != "FEISHU_AGENT"]
+    if _AGENT != "claude":
+        lines.append(f"FEISHU_AGENT={_AGENT}")
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _step(f"FEISHU_AGENT={_AGENT} recorded in {env_file}")
+
+
 def collect_credentials() -> None:
     """Interactively prompt for Feishu app credentials and write REPO/.env.
 
@@ -533,11 +594,13 @@ def collect_credentials() -> None:
     you retype. .env is gitignored, so secrets never enter the repo."""
     if "--no-creds" in sys.argv[1:]:
         _step("skipping credential prompt (--no-creds); fill .env manually.")
+        _persist_agent_only()
         return
     tty = _console()
     if tty is None:
         _step("no interactive console; skipping credential prompt. Fill .env later:")
         _step(f"  edit {REPO / '.env'}  (FEISHU_APP_ID / FEISHU_APP_SECRET)")
+        _persist_agent_only()
         return
 
     env_file = REPO / ".env"
@@ -561,11 +624,12 @@ def collect_credentials() -> None:
         "",
     ]
     defaults = {"FEISHU_EMOJI_WORKING": "OnIt", "FEISHU_EMOJI_DONE": "Done"}
-    managed = {k for k, _, _ in _ENV_KEYS}
+    managed = {k for k, _, _ in _ENV_KEYS} | {"FEISHU_AGENT"}  # agent chosen in preflight
     for key, label, secret in _ENV_KEYS:
         val = collected.get(key, "") or defaults.get(key, "")
         if val:
             lines.append(f"{key}={val}")
+    lines.append(f"FEISHU_AGENT={_AGENT}")  # coding-agent backend (claude/codex)
     # Preserve any pre-existing keys we don't manage (e.g. FEISHU_DISABLE_WS).
     for key, val in current.items():
         if key not in managed and val:
@@ -583,7 +647,7 @@ def main() -> None:
     print(f"[install] target: {CHAT_BRIDGE}\n")
     _platform_note()
 
-    _phase("Preflight — Python + Claude Code")
+    _phase("Preflight — Python + coding agent")
     preflight()
 
     _phase("Fetch bridge repo")
@@ -607,6 +671,7 @@ def main() -> None:
     print("[install] DONE.\n"
           f"  Repo:          {REPO}\n"
           f"  Venv:          {VENV}\n"
+          f"  Agent:         {_AGENT}\n"
           f"  CLI:           {_venv_bin('feishu-bridge')}\n"
           f"  Skill:         {SKILL_DST}\n"
           f"  Creds:         {REPO}/.env\n"

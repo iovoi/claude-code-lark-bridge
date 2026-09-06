@@ -82,3 +82,18 @@ class AgentAdapter(Protocol):
     async def run_turn(self, prompt: str, emit: Emit) -> dict[str, Any]: ...
     async def interrupt(self) -> None: ...
     async def stop(self) -> None: ...
+
+
+def make_adapter(cfg: Any, *, resume: str | None = None,
+                 approval_callback: ApprovalCallback | None = None,
+                 stderr_sink: Any = None) -> AgentAdapter:
+    """Build the agent backend selected by ``cfg.agent`` ("claude" | "codex")."""
+    if cfg.agent == "codex":
+        from .codex_adapter import CodexAdapter
+
+        return CodexAdapter(cfg, resume=resume, approval_callback=approval_callback,
+                            stderr_sink=stderr_sink)
+    from .claude_adapter import ClaudeAdapter
+
+    return ClaudeAdapter(cfg, resume=resume, approval_callback=approval_callback,
+                         stderr_sink=stderr_sink)

@@ -1,8 +1,9 @@
 """Per-scope turn orchestration.
 
 A :class:`ScopeRunner` owns one chat's state: single-flight (reject a 2nd message with a
-``/stop`` hint), the OnIt→Done emoji cycle, a streaming card, the lazy-started
-:class:`ClaudeAdapter` (resumed by the stored session id), approval delegation, and a
+``/stop`` hint), the OnIt→Done emoji cycle, a streaming card, the lazy-started agent
+adapter (:class:`~bridge.agent.ClaudeAdapter` or ``CodexAdapter``, per ``cfg.agent``;
+resumed by the stored session id), approval delegation, and a
 stuck watchdog. The runtime creates one per scope.
 """
 from __future__ import annotations
@@ -22,7 +23,8 @@ from .agent import (
     ToolUseEvent,
     UsageEvent,
 )
-from .agent.claude_adapter import ClaudeAdapter
+from .agent.claude_adapter import ClaudeAdapter  # noqa: F401 (re-exported for tests)
+from .agent import make_adapter
 from .approvals import ApprovalManager
 from .cards import CardState, StreamingCard
 from .config import BridgeConfig
@@ -57,7 +59,7 @@ class ScopeRunner:
         self._watchdog: Optional[StuckWatchdog] = None
 
     def _default_adapter_factory(self) -> AgentAdapter:
-        return ClaudeAdapter(
+        return make_adapter(
             self.cfg,
             resume=session_store.get_session_id(self.scope),
             approval_callback=self._approval_cb,

@@ -62,6 +62,17 @@ class BridgeConfig:
     emoji_done: str
     # Path to the claude CLI (bundled PATH lookup; overridable via FEISHU_CLAUDE_BIN).
     claude_bin: str
+    # Which coding-agent CLI backs the bridge: "claude" (default) or "codex".
+    agent: str
+    # Path to the codex CLI (bundled PATH lookup; overridable via FEISHU_CODEX_BIN).
+    codex_bin: str
+    # Extra CLI flags passed verbatim to the codex exec invocation
+    # (e.g. "-c model=\"gpt-5.2\"", split on whitespace like a shell would).
+    codex_extra_args: list[str]
+    # Codex sandbox policy for model-run commands (read-only / workspace-write /
+    # danger-full-access). codex exec has no interactive approval round-trip, so the
+    # sandbox is the safety boundary (approval cards are claude-only for now).
+    codex_sandbox: str
 
     @classmethod
     def load(cls) -> "BridgeConfig":
@@ -78,6 +89,12 @@ class BridgeConfig:
         }
 
         claude_bin = _env("FEISHU_CLAUDE_BIN", "").strip() or shutil.which("claude") or "claude"
+        agent = _env("FEISHU_AGENT", "claude").strip().lower() or "claude"
+        if agent not in ("claude", "codex"):
+            agent = "claude"  # unknown value: fall back to the default backend
+        codex_bin = _env("FEISHU_CODEX_BIN", "").strip() or shutil.which("codex") or "codex"
+        codex_extra_args = _env("FEISHU_CODEX_ARGS", "").split()
+        codex_sandbox = _env("FEISHU_CODEX_SANDBOX", "workspace-write").strip() or "workspace-write"
 
         return cls(
             workdir=workdir,
@@ -93,4 +110,8 @@ class BridgeConfig:
             emoji_working=_env("FEISHU_EMOJI_WORKING", feishu_api.EMOJI_WORKING),
             emoji_done=_env("FEISHU_EMOJI_DONE", feishu_api.EMOJI_DONE),
             claude_bin=claude_bin,
+            agent=agent,
+            codex_bin=codex_bin,
+            codex_extra_args=codex_extra_args,
+            codex_sandbox=codex_sandbox,
         )

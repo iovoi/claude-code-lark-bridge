@@ -53,9 +53,13 @@ message → swap to `Done`. Send `/stop` to cancel a turn. Conversation history 
 ## To MANAGE an already-running bridge (user says "stop" / "is it up?")
 Run the CLI and report the output:
 - start:  `feishu-bridge up`
+- start with a chosen coding agent:  `feishu-bridge up --agent claude` or `--agent codex`
+  (persisted instead via `FEISHU_AGENT` in `.env`; the installer prompts for it)
 - status: `feishu-bridge status`
 - stop:   `feishu-bridge stop`
 (local dev: `{{PY}} -m bridge <cmd>`)
+Note: codex runs under its sandbox (`FEISHU_CODEX_SANDBOX`, default `workspace-write`) —
+approval cards are claude-only; codex needs `codex login` on the machine running the bridge.
 
 ## Before YOU exit (only if YOU launched the bridge via this skill)
 If **you (the agent)** started the bridge in step 4, run `feishu-bridge stop` before the

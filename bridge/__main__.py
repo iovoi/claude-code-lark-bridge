@@ -10,6 +10,7 @@ until their owning modules (supervisor, runtime) land in Phase 5.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from . import __version__
@@ -23,12 +24,22 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"feishu-bridge {__version__}")
     sub = parser.add_subparsers(dest="cmd")
 
-    sub.add_parser("up", help="Start the bridge as a detached background process.")
+    up_p = sub.add_parser("up", help="Start the bridge as a detached background process.")
+    up_p.add_argument(
+        "--agent",
+        choices=("claude", "codex"),
+        help="Coding-agent CLI to back the bridge (overrides FEISHU_AGENT/.env).",
+    )
     sub.add_parser("status", help="Report whether the bridge is running (pid, session).")
     sub.add_parser("stop", help="Stop the running bridge.")
     run_p = sub.add_parser("run", help="Run the bridge in the foreground (debug / supervised).")
     run_p.add_argument(
         "--no-ws", action="store_true", help="Skip starting the Feishu websocket (offline/tests)."
+    )
+    run_p.add_argument(
+        "--agent",
+        choices=("claude", "codex"),
+        help="Coding-agent CLI to back the bridge (overrides FEISHU_AGENT/.env).",
     )
     return parser
 
@@ -36,6 +47,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     cmd = args.cmd or "status"
+
+    agent = getattr(args, "agent", None)
+    if agent:
+        # Both the foreground runtime and the detached child spawned by the
+        # supervisor resolve the backend from this env var at config load.
+        os.environ["FEISHU_AGENT"] = agent
 
     if cmd == "run":
         # Wired in T5.4 (runtime).

@@ -1,8 +1,9 @@
 """Per-scope turn orchestration.
 
 A :class:`ScopeRunner` owns one chat's state: single-flight (reject a 2nd message with a
-``/stop`` hint), the OnIt→Done emoji cycle, a streaming card, the lazy-started
-:class:`ClaudeAdapter` (resumed by the stored session id), approval delegation, and a
+``/stop`` hint), the OnIt→Done emoji cycle, a streaming card, the lazy-started agent
+adapter (:class:`~bridge.agent.ClaudeAdapter` or ``CodexAdapter``, per ``cfg.agent``;
+resumed by the stored session id), approval delegation, and a
 stuck watchdog. The runtime creates one per scope.
 """
 from __future__ import annotations
@@ -22,7 +23,8 @@ from .agent import (
     ToolUseEvent,
     UsageEvent,
 )
-from .agent.claude_adapter import ClaudeAdapter
+from .agent.claude_adapter import ClaudeAdapter  # noqa: F401 (re-exported for tests)
+from .agent import make_adapter
 from .approvals import ApprovalManager
 from .cards import CardState, StreamingCard
 from .config import BridgeConfig
@@ -57,10 +59,21 @@ class ScopeRunner:
         self._watchdog: Optional[StuckWatchdog] = None
 
     def _default_adapter_factory(self) -> AgentAdapter:
-        return ClaudeAdapter(
+        # stderr of the agent CLI goes to a log file (observability): a codex
+        # resume failure or claude crash otherwise vanishes with the pipe.
+        stderr_sink = None
+        try:
+            from .supervisor import RUN_DIR
+
+            RUN_DIR.mkdir(parents=True, exist_ok=True)
+            stderr_sink = open(RUN_DIR / "agent-stderr.log", "ab", buffering=0)
+        except Exception:
+            stderr_sink = None
+        return make_adapter(
             self.cfg,
-            resume=session_store.get_session_id(self.scope),
+            resume=session_store.get_session_id(self.scope, agent=self.cfg.agent),
             approval_callback=self._approval_cb,
+            stderr_sink=stderr_sink,
         )
 
     # ------------------------------------------------------------------ entry
@@ -175,7 +188,9 @@ class ScopeRunner:
             self.lark.send_text(self.chat_id, answer[:4000])
         self.lark.swap_to_done(message_id, onit)
         if self._adapter is not None and self._adapter.session_id:
-            session_store.set_session_id(self.scope, self._adapter.session_id, str(self.cfg.workdir))
+            session_store.set_session_id(
+                self.scope, self._adapter.session_id, str(self.cfg.workdir), agent=self.cfg.agent
+            )
 
     async def _emit(self, event) -> None:
         if self._watchdog is not None:

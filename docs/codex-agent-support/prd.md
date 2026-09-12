@@ -48,8 +48,10 @@ makes the backend pluggable — `claude` (default, unchanged behavior) or `codex
 2. `make_adapter(cfg, …)` returns a `CodexAdapter` iff `cfg.agent == "codex"`,
    else `ClaudeAdapter`. ✅ same test
 3. The codex argv for a fresh turn is `codex exec --json --skip-git-repo-check
-   -s <sandbox> [<extra args>] -` (prompt on stdin); for a resumed turn
-   `codex exec resume <session-id> …same flags… -`. ✅ `test_codex_argv_fresh_turn`,
+   -c sandbox_mode="<sandbox>" [<extra args>] -` (prompt on stdin); for a
+   resumed turn `codex exec resume <session-id> …same flags… -`. The sandbox
+   is a `-c` config override, never `-s` — `exec resume` rejects `-s`
+   (rc=2, every resumed turn failed). ✅ `test_codex_argv_fresh_turn`,
    `test_codex_argv_resume_and_extra_args`
 4. Live codex JSONL events map as: `thread.started`→`SystemEvent` (+capture
    thread id), `item.completed item.type=agent_message`→`TextEvent`,
@@ -83,7 +85,8 @@ makes the backend pluggable — `claude` (default, unchanged behavior) or `codex
   - `FEISHU_CODEX_ARGS` — extra CLI flags, whitespace-split (e.g.
     `-c model=gpt-5.2 --enable feature`). Default: none.
   - `FEISHU_CODEX_SANDBOX` — `read-only` | `workspace-write` (default) |
-    `danger-full-access`; passed as `-s <value>`.
+    `danger-full-access`; passed as the config override
+    `-c sandbox_mode="<value>"` (not `-s`: `exec resume` rejects `-s`).
 - CLI: `feishu-bridge up --agent claude|codex`, `feishu-bridge run --agent claude|codex`
   (argparse `choices=("claude","codex")`). The flag sets `os.environ["FEISHU_AGENT"]`
   before dispatch, so both the foreground runtime and the supervisor's

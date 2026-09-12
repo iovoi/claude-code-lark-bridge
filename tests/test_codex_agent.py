@@ -34,7 +34,9 @@ def test_codex_argv_fresh_turn():
     argv = _build_codex_argv("codex", sandbox="workspace-write", extra_args=[], resume=None)
     assert argv[:2] == ["codex", "exec"]
     assert "--json" in argv
-    assert argv[argv.index("-s") + 1] == "workspace-write"
+    # sandbox goes via -c config override (exec resume rejects -s)
+    assert "-s" not in argv
+    assert argv[argv.index("-c") + 1] == 'sandbox_mode="workspace-write"'
     assert argv[-1] == "-"  # prompt rides on stdin
     assert "resume" not in argv
 
@@ -45,7 +47,10 @@ def test_codex_argv_resume_and_extra_args():
     )
     assert argv[:4] == ["codex", "exec", "resume", "sess-1"]
     assert "--json" in argv
-    assert argv[argv.index("-c") + 1] == "model=x"
+    assert "-s" not in argv  # regression: -s broke every resumed turn (rc=2)
+    cfgs = [argv[i + 1] for i, a in enumerate(argv) if a == "-c"]
+    assert 'sandbox_mode="read-only"' in cfgs
+    assert "model=x" in cfgs
     assert argv[-1] == "-"
 
 

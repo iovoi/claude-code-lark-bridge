@@ -8,8 +8,9 @@ until the turn completes. Continuity across turns is provided by
 ``thread.started``.
 
 Exec mode has no interactive approval round-trip (no ``can_use_tool`` control
-protocol), so the codex sandbox policy (``-s``, default ``workspace-write`` via
-FEISHU_CODEX_SANDBOX) is the safety boundary — approval cards are
+protocol), so the codex sandbox policy (default ``workspace-write`` via
+FEISHU_CODEX_SANDBOX, passed as a ``-c sandbox_mode="…"`` config override so it
+also works on ``exec resume``) is the safety boundary — approval cards are
 claude-only for now; ``approval_callback`` is accepted but unused.
 
 The JSONL event shapes are codex's experimental ``--json`` output (verified
@@ -171,7 +172,16 @@ def _build_codex_argv(
         ),
         "exec",
     ]
-    common = ["--json", "--skip-git-repo-check", "-s", sandbox, *extra_args, "-"]
+    # Sandbox via -c config override, NOT -s: `exec resume` (a clap subcommand)
+    # accepts -c/--json/--skip-git-repo-check but rejects -s — passing it made
+    # every resumed turn die with rc=2 "unexpected argument '-s' found".
+    common = [
+        "--json",
+        "--skip-git-repo-check",
+        "-c", f'sandbox_mode="{sandbox}"',
+        *extra_args,
+        "-",
+    ]
     if resume:
         # `exec resume` defines its own flags (clap subcommand), so they go after it.
         argv += ["resume", str(resume), *common]

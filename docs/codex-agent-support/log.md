@@ -18,6 +18,26 @@ Copy the template below, fill it in, and insert it at the top of "Entries".
 
 ## Entries
 
+### 2026-09-13 12:35 — Live bug: every resumed codex turn died on `-s` (fixed)
+- **Task:** post-merge live use
+- **What happened:** second turn in a codex chat failed — surfaced by the
+  error-reporting fix as `codex exited (rc=2): error: unexpected argument
+  '-s' found` (Usage: codex exec resume …). Fresh turns worked; only resume
+  turns broke.
+- **Discovery / blocker:** `codex exec resume` (clap subcommand) accepts
+  `--json`/`--skip-git-repo-check`/`-c` but **not `-s/--sandbox`**; the argv
+  builder passed the common flag set after `resume <id>`.
+- **Resolution / workaround:** express the sandbox as a config override —
+  `-c sandbox_mode="<FEISHU_CODEX_SANDBOX>"` — which both `exec` and
+  `exec resume` accept. Live-verified with the real Windows exe + a real
+  stored thread id: `thread.started` (same id) → `pong` → `turn.completed`.
+- **PRD impact:** amended acceptance #3 and §4.1 (argv now uses
+  `-c sandbox_mode=…`, never `-s`); regression asserts `"-s" not in argv`.
+  Side observation (no action): resuming a `gpt-5.6-terra` thread with the
+  0.147 default `gpt-5.5` logs an informational model-mismatch item — the
+  mapper ignores unknown item types, and users can pin the model via
+  `FEISHU_CODEX_ARGS`.
+
 ### 2026-09-06 23:05 — Parity matrix added to the PRD
 - **Task:** T4.4 (docs)
 - **What happened:** user asked to confirm codex support is feature-identical

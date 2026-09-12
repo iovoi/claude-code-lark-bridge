@@ -13,8 +13,6 @@
 - **Resolution / workaround:** feature complete; PRD status → Complete.
 - **PRD impact:** none.
 
-## Entries
-
 ### 2026-09-13 15:40 — Live smoke T3.3 + fix: plain "allow" was sticky
 - **Task:** T3.3
 - **What happened:** user live-tested. Test 1 (write to C:\Users\wade\):

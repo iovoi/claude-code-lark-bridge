@@ -263,13 +263,14 @@ class CodexAdapter:
         escalation approval card (same middle-layer ApprovalCallback the
         claude adapter uses) and on allow retry the turn once, one tier up."""
         result: dict[str, Any] = {}
+        base_tier = self._cfg.codex_sandbox
         for attempt in range(2):  # original + at most one escalated rerun
             result, denial = await self._run_once(prompt, emit, on_frame)
             if attempt or denial is None:
-                return result
+                break
             verdict = await self._ask_escalation(denial)
             if verdict is None:
-                return result  # denied / no callback / already at top tier
+                break  # denied / no callback / already at top tier
             try:
                 idx = _ESCALATION_ORDER.index(self._sandbox)
                 self._sandbox = _ESCALATION_ORDER[min(idx + 1, len(_ESCALATION_ORDER) - 1)]
@@ -278,6 +279,11 @@ class CodexAdapter:
             self._escalated = verdict == "approve_all"
             prompt = (prompt + f"\n\n[sandbox escalated to {self._sandbox}. "
                       "Retry the previously blocked operation now.]")
+        if not self._escalated:
+            # Plain "allow" is per-turn (claude Approve semantics): the rerun
+            # ran elevated; subsequent turns drop back to the base tier.
+            # Only "approve_all" keeps the chat escalated.
+            self._sandbox = base_tier
         return result
 
     async def _ask_escalation(self, denial: dict[str, Any]) -> Optional[str]:

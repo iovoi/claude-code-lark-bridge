@@ -80,7 +80,10 @@ was detected during it, and the tier is not already escalated:
    and rerun ONCE: same thread (`exec resume`), prompt =
    original prompt + `"\n\n[sandbox escalated to <tier>. Retry the previously
    blocked operation now."`; the rerun's events are emitted on the same
-   `emit`; its result replaces the first.
+   `emit`; its result replaces the first. **Tier semantics (claude-parity)**:
+   plain `"allow"` elevates ONLY the rerun — after it, `self._sandbox`
+   reverts to the base tier (next denial asks again); `"approve_all"` keeps
+   the escalated tier for the adapter's lifetime (no further cards).
 4. No approval_callback → no card, no rerun (headless/CI behavior).
 
 ### 4.3 Interfaces

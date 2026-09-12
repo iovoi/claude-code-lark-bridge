@@ -404,9 +404,11 @@ def test_escalation_flow_allow(monkeypatch):
     assert asks and asks[0][0] == "sandbox-escalation"
     assert asks[0][1]["command"].startswith("Set-Content")
     assert len(argv_log) == 2  # original + escalated rerun
-    assert ad._sandbox == "danger-full-access"
+    # the RERUN ran elevated…
     rerun_cfgs = [a for a in argv_log[1] if a.startswith("sandbox_mode=")]
     assert rerun_cfgs == ['sandbox_mode="danger-full-access"']
+    # …but plain "allow" is per-turn: back to the base tier afterwards
+    assert ad._sandbox == "workspace-write"
 
 
 def test_escalation_flow_deny(monkeypatch):
@@ -458,6 +460,10 @@ def test_escalation_flow_approve_all_persists(monkeypatch):
     asyncio.run(ad.run_turn("turn two", emit))
     assert asks == ["sandbox-escalation"]  # asked exactly once
     assert len(argv_log) == 3  # t1 original, t1 rerun, t2 (already elevated, no rerun)
+    # approve_all KEEPS the escalated tier for the chat (unlike plain allow)
+    assert ad._sandbox == "danger-full-access"
+    t2_cfgs = [a for a in argv_log[2] if a.startswith("sandbox_mode=")]
+    assert t2_cfgs == ['sandbox_mode="danger-full-access"']
 
 
 def test_escalation_no_loop(monkeypatch):

@@ -4,6 +4,22 @@
 
 ## Entries
 
+### 2026-09-13 15:40 — Live smoke T3.3 + fix: plain "allow" was sticky
+- **Task:** T3.3
+- **What happened:** user live-tested. Test 1 (write to C:\Users\wade\):
+  card shown, resolved `allow`, escalated rerun wrote the file ✓. Test 2
+  (write to Desktop, same chat): NO card, wrote directly — unexpected.
+- **Discovery / blocker:** after a plain `allow` the adapter left
+  `self._sandbox` at danger-full-access for the chat's lifetime; only the
+  "don't re-ask" part was approve_all-gated. The tier itself leaked —
+  claude's Approve is per-use, Approve-all persists.
+- **Resolution / workaround:** plain `allow` now elevates only the rerun;
+  after it, the tier reverts to the base (`cfg.codex_sandbox`). Only
+  `approve_all` keeps the chat elevated. Tests updated (rerun argv still
+  elevated; tier back to base after allow; stays elevated after
+  approve_all), suite 58 passed. Redeployed.
+- **PRD impact:** §4.2 tier semantics amended.
+
 ### 2026-09-13 15:05 — Implementation complete, suite 58 passed
 - **Task:** T1.1, T2.1, T3.1
 - **What happened:** detection (`_looks_sandbox_denied` + built-in signatures

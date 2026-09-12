@@ -25,8 +25,8 @@
 ## Phase 3 — Verify & ship
 - [x] **T3.1** Full suite green
   - Acceptance: `.venv/bin/python -m pytest tests/ -q` all pass.
-- [ ] **T3.2** Ship: stacked branch → PR → deploy installed copy → restart
+- [x] **T3.2** Ship: stacked branch → PR → deploy installed copy → restart
   bridge; log the deploy in log.md.
-- [ ] **T3.3** Live smoke: bot asked to write outside the workdir shows an
+- [x] **T3.3** Live smoke: bot asked to write outside the workdir shows an
   approval card; Allow → retry succeeds. (Needs the user in Feishu; record
   result in log.md.)

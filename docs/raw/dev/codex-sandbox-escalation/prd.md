@@ -1,6 +1,6 @@
 # PRD: Codex sandbox escalation card (approval parity, exec-mode approximation)
 
-- **Status:** In Progress
+- **Status:** Complete
 - **Feature dir:** `docs/raw/dev/codex-sandbox-escalation/`
 - **Created:** 2026-09-13 · **Last updated:** 2026-09-13
 - **Parent feature:** `docs/raw/dev/codex-agent-support/` (§8 parity matrix —

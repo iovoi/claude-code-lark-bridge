@@ -4,6 +4,17 @@
 
 ## Entries
 
+### 2026-09-13 16:05 — T3.3 live smoke PASSED (post-fix retest)
+- **Task:** T3.3
+- **What happened:** after the semantics fix + bridge restart, the user
+  re-tested in Feishu. Log shows three escalation cards in one chat: two
+  resolved `allow` (each out-of-workdir write asked again — allow is no
+  longer sticky) and one `deny` (refusal path: no rerun). All as designed.
+- **Resolution / workaround:** feature complete; PRD status → Complete.
+- **PRD impact:** none.
+
+## Entries
+
 ### 2026-09-13 15:40 — Live smoke T3.3 + fix: plain "allow" was sticky
 - **Task:** T3.3
 - **What happened:** user live-tested. Test 1 (write to C:\Users\wade\):

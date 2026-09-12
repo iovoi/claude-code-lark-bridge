@@ -69,10 +69,19 @@ class BridgeConfig:
     # Extra CLI flags passed verbatim to the codex exec invocation
     # (e.g. "-c model=\"gpt-5.2\"", split on whitespace like a shell would).
     codex_extra_args: list[str]
+    # Extra sandbox-denial substrings (OR-ed with the built-in signatures) that
+    # mark a failed codex command as "blocked by sandbox" — the trigger for the
+    # escalation approval card. Comma-separated in FEISHU_CODEX_DENY_PATTERNS.
+    codex_deny_patterns: list[str]
     # Codex sandbox policy for model-run commands (read-only / workspace-write /
     # danger-full-access). codex exec has no interactive approval round-trip, so the
     # sandbox is the safety boundary (approval cards are claude-only for now).
     codex_sandbox: str
+    # Resume the session/thread stored in sessions.json at bridge startup
+    # (cross-restart context continuity, identical for claude and codex).
+    # Default OFF: every bridge start opens fresh threads per chat; messages
+    # within one running bridge still share context.
+    resume_sessions: bool
 
     @classmethod
     def load(cls) -> "BridgeConfig":
@@ -94,7 +103,9 @@ class BridgeConfig:
             agent = "claude"  # unknown value: fall back to the default backend
         codex_bin = _env("FEISHU_CODEX_BIN", "").strip() or shutil.which("codex") or "codex"
         codex_extra_args = _env("FEISHU_CODEX_ARGS", "").split()
+        codex_deny_patterns = [p.strip().lower() for p in _env("FEISHU_CODEX_DENY_PATTERNS", "").split(",") if p.strip()]
         codex_sandbox = _env("FEISHU_CODEX_SANDBOX", "workspace-write").strip() or "workspace-write"
+        resume_sessions = _env("FEISHU_RESUME_SESSIONS", "0").strip().lower() in ("1", "true", "yes", "on")
 
         return cls(
             workdir=workdir,
@@ -113,5 +124,7 @@ class BridgeConfig:
             agent=agent,
             codex_bin=codex_bin,
             codex_extra_args=codex_extra_args,
+            codex_deny_patterns=codex_deny_patterns,
             codex_sandbox=codex_sandbox,
+            resume_sessions=resume_sessions,
         )

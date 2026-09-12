@@ -10,8 +10,12 @@ until the turn completes. Continuity across turns is provided by
 Exec mode has no interactive approval round-trip (no ``can_use_tool`` control
 protocol), so the codex sandbox policy (default ``workspace-write`` via
 FEISHU_CODEX_SANDBOX, passed as a ``-c sandbox_mode="…"`` config override so it
-also works on ``exec resume``) is the safety boundary — approval cards are
-claude-only for now; ``approval_callback`` is accepted but unused.
+also works on ``exec resume``) is the safety boundary — approximated for UX by
+the escalation card: when a command fails BECAUSE of the sandbox, the adapter
+routes an escalation request through the same middle-layer
+``ApprovalCallback`` the claude adapter uses (Lark approval card); on
+allow/approve_all it bumps the tier one step (read-only → workspace-write →
+danger-full-access) and retries the turn once on the same thread.
 
 The JSONL event shapes are codex's experimental ``--json`` output (verified
 against codex-cli 0.147): ``thread.started`` / ``turn.started`` /
@@ -49,6 +53,36 @@ _TOOL_ITEM_NAMES = {
     "web_search": "web_search",
     "todo_list": "todo_list",
 }
+
+# Sandbox tiers, low → high; escalation moves one step up this order.
+_ESCALATION_ORDER = ("read-only", "workspace-write", "danger-full-access")
+
+# Substrings (lowercased, OR-ed) marking a FAILED command_execution as
+# "blocked by the sandbox" — the escalation-card trigger. First two verified
+# live on Windows codex.exe (workspace-write, out-of-workdir write); the rest
+# cover codex's own strings and Linux Landlock EPERM.
+_DENY_SIGNATURES = (
+    "access to the path",  # + "is denied" checked pairwise below (Windows ACL)
+    "blocked by the sandbox",
+    "sandbox policy",
+    "operation not permitted",
+    "operation not allowed",
+)
+
+
+def _looks_sandbox_denied(item: dict[str, Any], extra_patterns: tuple = ()) -> bool:
+    """True if a completed command_execution item failed BECAUSE of the sandbox
+    (not an ordinary failure like command-not-found). Never raises."""
+    try:
+        if item.get("type") != "command_execution" or item.get("status") != "failed":
+            return False
+        out = str(item.get("aggregated_output") or item.get("output") or "").lower()
+        if "access to the path" in out and "is denied" in out:
+            return True  # Windows sandboxed-write denial (verified live)
+        sigs = _DENY_SIGNATURES + tuple(extra_patterns)
+        return any(s in out for s in sigs)
+    except Exception:
+        return False
 
 
 def _reasoning_text(item: dict[str, Any]) -> str:
@@ -212,6 +246,9 @@ class CodexAdapter:
         self._stderr_sink = stderr_sink
         self._stderr_buf = bytearray()  # bounded tail of codex stderr (error reporting)
         self._started = False
+        # Effective sandbox tier (escalates with user approval; see run_turn).
+        self._sandbox = cfg.codex_sandbox
+        self._escalated = False  # approve_all: tier stays high for this adapter
 
     @property
     def session_id(self) -> str | None:
@@ -222,9 +259,53 @@ class CodexAdapter:
         self._started = True
 
     async def run_turn(self, prompt: str, emit: Emit, on_frame: Any = None) -> dict[str, Any]:
+        """Run one turn; if a command was denied by the sandbox, offer an
+        escalation approval card (same middle-layer ApprovalCallback the
+        claude adapter uses) and on allow retry the turn once, one tier up."""
+        result: dict[str, Any] = {}
+        base_tier = self._cfg.codex_sandbox
+        for attempt in range(2):  # original + at most one escalated rerun
+            result, denial = await self._run_once(prompt, emit, on_frame)
+            if attempt or denial is None:
+                break
+            verdict = await self._ask_escalation(denial)
+            if verdict is None:
+                break  # denied / no callback / already at top tier
+            try:
+                idx = _ESCALATION_ORDER.index(self._sandbox)
+                self._sandbox = _ESCALATION_ORDER[min(idx + 1, len(_ESCALATION_ORDER) - 1)]
+            except ValueError:
+                self._sandbox = "danger-full-access"
+            self._escalated = verdict == "approve_all"
+            prompt = (prompt + f"\n\n[sandbox escalated to {self._sandbox}. "
+                      "Retry the previously blocked operation now.]")
+        if not self._escalated:
+            # Plain "allow" is per-turn (claude Approve semantics): the rerun
+            # ran elevated; subsequent turns drop back to the base tier.
+            # Only "approve_all" keeps the chat escalated.
+            self._sandbox = base_tier
+        return result
+
+    async def _ask_escalation(self, denial: dict[str, Any]) -> Optional[str]:
+        """Route a sandbox denial through the approval card. Returns the
+        verdict ("allow"/"approve_all") or None (= don't escalate)."""
+        if self._approval_callback is None or self._escalated:
+            return None
+        if self._sandbox == _ESCALATION_ORDER[-1]:
+            return None  # nowhere higher to go
+        try:
+            verdict = await self._approval_callback("sandbox-escalation", denial)
+        except Exception as e:  # never wedge the turn on a UI failure
+            print(f"[codex] escalation card error: {e!r}", file=sys.stderr)
+            return None
+        return verdict if verdict in ("allow", "approve_all") else None
+
+    async def _run_once(self, prompt: str, emit: Emit, on_frame: Any = None) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+        """Spawn one codex exec process for the prompt; returns (result_info,
+        first_sandbox_denial_or_None)."""
         argv = _build_codex_argv(
             self._cfg.codex_bin,
-            sandbox=self._cfg.codex_sandbox,
+            sandbox=self._sandbox,
             extra_args=list(self._cfg.codex_extra_args),
             resume=self._resume,
         )
@@ -255,6 +336,7 @@ class CodexAdapter:
         result_info: dict[str, Any] = {"session_id": self.session_id}
         done = False
         emitted = False
+        denial: Optional[dict[str, Any]] = None
         while not done:
             raw = await self._proc.stdout.readline()
             if not raw:
@@ -272,6 +354,14 @@ class CodexAdapter:
             for agent_evt in events:
                 emitted = True
                 await emit(agent_evt)
+            if (denial is None and evt.get("type") == "item.completed"
+                    and isinstance(evt.get("item"), dict)
+                    and _looks_sandbox_denied(evt["item"], tuple(self._cfg.codex_deny_patterns))):
+                item = evt["item"]
+                denial = {
+                    "command": str(item.get("command") or "")[:300],
+                    "error": str(item.get("aggregated_output") or item.get("output") or "")[:300],
+                }
         rc = await self._proc.wait()
         if not done and (rc != 0 or not emitted):
             # codex died before finishing (e.g. bad resume id, auth failure):
@@ -287,7 +377,7 @@ class CodexAdapter:
             # later turns resume this thread
             self._resume = self.session_id
         result_info.update(session_id=self.session_id, exit_code=rc)
-        return result_info
+        return result_info, denial
 
     async def interrupt(self) -> None:
         # No control protocol in exec mode — terminate the in-flight turn's tree.

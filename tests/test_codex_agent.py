@@ -15,6 +15,7 @@ from bridge.agent.claude_adapter import ClaudeAdapter
 from bridge.agent.codex_adapter import (
     CodexAdapter,
     _build_codex_argv,
+    _looks_sandbox_denied,
     _map_event,
 )
 from bridge.config import BridgeConfig
@@ -318,3 +319,173 @@ def test_scope_factory_fresh_by_default(tmp_path, monkeypatch):
 
     ad2 = make_runner(resume_sessions=True)._default_adapter_factory()
     assert ad2._resume == "th-old"  # opt-in: cross-restart resume
+
+
+# ---- sandbox escalation card -----------------------------------------------------
+
+_WIN_DENIED_OUT = ("Set-Content : Access to the path "
+                   "'C:\\Users\\wade\\probe_outside.txt' is denied.\r\nAt line:1 char:1")
+
+
+def _denied_item(cmd="Set-Content probe", out=_WIN_DENIED_OUT):
+    return {"type": "command_execution", "id": "i1", "command": cmd,
+            "aggregated_output": out, "status": "failed", "exit_code": 1}
+
+
+def _ok_item(cmd="ls"):
+    return {"type": "command_execution", "id": "i2", "command": cmd,
+            "aggregated_output": "file1\nfile2", "status": "completed", "exit_code": 0}
+
+
+def test_denial_detection_hit():
+    assert _looks_sandbox_denied(_denied_item())
+    assert _looks_sandbox_denied(_denied_item(
+        out="curl: operation was blocked by the sandbox policy"))
+    # extra (custom) patterns from FEISHU_CODEX_DENY_PATTERNS also trigger
+    assert _looks_sandbox_denied(
+        _denied_item(out="my-custom-denial happened"),
+        extra_patterns=("my-custom-denial",))
+    assert not _looks_sandbox_denied(_denied_item(out="my-custom-denial happened"))
+
+
+def test_denial_detection_ordinary_failure_miss():
+    # command-not-found / generic failures must NOT trigger the card
+    miss = {"type": "command_execution", "id": "i3", "command": "head -c 100",
+            "aggregated_output": "head : The term 'head' is not recognized",
+            "status": "failed", "exit_code": 1}
+    assert not _looks_sandbox_denied(miss)
+    assert not _looks_sandbox_denied(_ok_item())  # successful command
+    assert not _looks_sandbox_denied({"type": "agent_message", "text": "denied?"})
+
+
+def _esc_procs():
+    """Fake procs: first turn hits a sandbox denial, rerun succeeds."""
+    denied_turn = [
+        json.dumps({"type": "thread.started", "thread_id": "th-1"}),
+        json.dumps({"type": "item.completed", "item": _denied_item()}),
+        json.dumps({"type": "turn.completed", "usage": {}}),
+    ]
+    ok_turn = [
+        json.dumps({"type": "item.completed", "item": _ok_item()}),
+        json.dumps({"type": "turn.completed", "usage": {}}),
+    ]
+    return [FakeProc(denied_turn), FakeProc(ok_turn)]
+
+
+def _scripted_spawn(procs, argv_log):
+    async def _ok(proc):
+        return proc
+
+    def spawn(*argv, **kwargs):
+        argv_log.append(list(argv))
+        return _ok(procs.pop(0))
+    return spawn
+
+
+def test_escalation_flow_allow(monkeypatch):
+    procs = _esc_procs()
+    argv_log: list = []
+    monkeypatch.setattr(
+        "bridge.agent.codex_adapter.asyncio.create_subprocess_exec",
+        _scripted_spawn(procs, argv_log))
+    asks: list = []
+
+    async def approve(tool, inp):
+        asks.append((tool, inp))
+        return "allow"
+
+    ad = CodexAdapter(_cfg(agent="codex"), approval_callback=approve)
+    events = []
+
+    async def emit(e):
+        events.append(e)
+
+    asyncio.run(ad.run_turn("write outside", emit))
+    assert asks and asks[0][0] == "sandbox-escalation"
+    assert asks[0][1]["command"].startswith("Set-Content")
+    assert len(argv_log) == 2  # original + escalated rerun
+    # the RERUN ran elevated…
+    rerun_cfgs = [a for a in argv_log[1] if a.startswith("sandbox_mode=")]
+    assert rerun_cfgs == ['sandbox_mode="danger-full-access"']
+    # …but plain "allow" is per-turn: back to the base tier afterwards
+    assert ad._sandbox == "workspace-write"
+
+
+def test_escalation_flow_deny(monkeypatch):
+    procs = _esc_procs()
+    argv_log: list = []
+    monkeypatch.setattr(
+        "bridge.agent.codex_adapter.asyncio.create_subprocess_exec",
+        _scripted_spawn(procs, argv_log))
+
+    async def deny(tool, inp):
+        return "deny"
+
+    ad = CodexAdapter(_cfg(agent="codex"), approval_callback=deny)
+
+    async def emit(e):
+        pass
+
+    asyncio.run(ad.run_turn("write outside", emit))
+    assert len(argv_log) == 1  # no rerun on deny
+    assert ad._sandbox == "workspace-write"
+
+
+def test_escalation_flow_approve_all_persists(monkeypatch):
+    procs = _esc_procs()
+    argv_log: list = []
+    monkeypatch.setattr(
+        "bridge.agent.codex_adapter.asyncio.create_subprocess_exec",
+        _scripted_spawn(procs, argv_log))
+    asks: list = []
+
+    async def approve_all(tool, inp):
+        asks.append(tool)
+        return "approve_all"
+
+    ad = CodexAdapter(_cfg(agent="codex"), approval_callback=approve_all)
+
+    async def emit(e):
+        pass
+
+    asyncio.run(ad.run_turn("turn one", emit))  # escalate
+    # second turn with another denial: no second card (approve_all remembered)
+    more = [FakeProc([
+        json.dumps({"type": "item.completed", "item": _denied_item()}),
+        json.dumps({"type": "turn.completed", "usage": {}}),
+    ])]
+    monkeypatch.setattr(
+        "bridge.agent.codex_adapter.asyncio.create_subprocess_exec",
+        _scripted_spawn(more, argv_log))
+    asyncio.run(ad.run_turn("turn two", emit))
+    assert asks == ["sandbox-escalation"]  # asked exactly once
+    assert len(argv_log) == 3  # t1 original, t1 rerun, t2 (already elevated, no rerun)
+    # approve_all KEEPS the escalated tier for the chat (unlike plain allow)
+    assert ad._sandbox == "danger-full-access"
+    t2_cfgs = [a for a in argv_log[2] if a.startswith("sandbox_mode=")]
+    assert t2_cfgs == ['sandbox_mode="danger-full-access"']
+
+
+def test_escalation_no_loop(monkeypatch):
+    # rerun ALSO hits a denial: still exactly one rerun per turn
+    denied_lines = [
+        json.dumps({"type": "thread.started", "thread_id": "th-2"}),
+        json.dumps({"type": "item.completed", "item": _denied_item()}),
+        json.dumps({"type": "turn.completed", "usage": {}}),
+    ]
+    procs = [FakeProc(list(denied_lines)), FakeProc(list(denied_lines))]
+    argv_log: list = []
+    monkeypatch.setattr(
+        "bridge.agent.codex_adapter.asyncio.create_subprocess_exec",
+        _scripted_spawn(procs, argv_log))
+
+    async def approve(tool, inp):
+        return "allow"
+
+    ad = CodexAdapter(_cfg(agent="codex"), approval_callback=approve)
+
+    async def emit(e):
+        pass
+
+    asyncio.run(ad.run_turn("loop check", emit))
+    assert len(argv_log) == 2  # capped: original + one rerun

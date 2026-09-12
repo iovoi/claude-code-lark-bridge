@@ -24,8 +24,9 @@ process per chat. It hand-rolls the bidirectional control protocol so it can sho
 tool off the allowlist — tap a button or reply `approve`/`all`/`deny`/`stop` in chat; and a
 **deferred "Working…" progress card** (only after 10s, status-only). No PTY, no tmux, identical on
 Windows / Mac / Linux. On a message: stamp `OnIt` → run the turn → post the answer as a bot
-message → swap to `Done`. Send `/stop` to cancel a turn. Conversation history + memory persist per chat
-(claude session, `--resume`d across restarts).
+message → swap to `Done`. Send `/stop` to cancel a turn. Each bridge start opens a fresh
+session/thread per chat (identical for claude and codex; `FEISHU_RESUME_SESSIONS=1` in `.env`
+opts back into cross-restart resume).
 
 ## To SET UP / RUN the bridge (user says "set up/run/start/bring up/connect the bridge")
 1. **Preflight** (report what is missing):

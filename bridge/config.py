@@ -73,6 +73,11 @@ class BridgeConfig:
     # danger-full-access). codex exec has no interactive approval round-trip, so the
     # sandbox is the safety boundary (approval cards are claude-only for now).
     codex_sandbox: str
+    # Resume the session/thread stored in sessions.json at bridge startup
+    # (cross-restart context continuity, identical for claude and codex).
+    # Default OFF: every bridge start opens fresh threads per chat; messages
+    # within one running bridge still share context.
+    resume_sessions: bool
 
     @classmethod
     def load(cls) -> "BridgeConfig":
@@ -95,6 +100,7 @@ class BridgeConfig:
         codex_bin = _env("FEISHU_CODEX_BIN", "").strip() or shutil.which("codex") or "codex"
         codex_extra_args = _env("FEISHU_CODEX_ARGS", "").split()
         codex_sandbox = _env("FEISHU_CODEX_SANDBOX", "workspace-write").strip() or "workspace-write"
+        resume_sessions = _env("FEISHU_RESUME_SESSIONS", "0").strip().lower() in ("1", "true", "yes", "on")
 
         return cls(
             workdir=workdir,
@@ -114,4 +120,5 @@ class BridgeConfig:
             codex_bin=codex_bin,
             codex_extra_args=codex_extra_args,
             codex_sandbox=codex_sandbox,
+            resume_sessions=resume_sessions,
         )

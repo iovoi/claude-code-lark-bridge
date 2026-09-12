@@ -281,3 +281,40 @@ def test_session_store_legacy_entry_is_claude(tmp_path, monkeypatch):
     assert session_store.get_session_id("s1") == "541ae274-9d7f"
     assert session_store.get_session_id("s1", agent="claude") == "541ae274-9d7f"
     assert session_store.get_session_id("s1", agent="codex") is None
+
+
+# ---- fresh-thread default (FEISHU_RESUME_SESSIONS) ------------------------------
+
+def test_resume_sessions_config_default_off(monkeypatch, tmp_path):
+    import bridge.config as c
+
+    monkeypatch.setattr(c, "_env", lambda key, default="": {
+        "FEISHU_RESUME_SESSIONS": "", "FEISHU_AGENT": "codex",
+    }.get(key, default))
+    monkeypatch.setattr(c.feishu_api, "CONVERSATION_DIR", tmp_path)
+    assert c.BridgeConfig.load().resume_sessions is False
+
+    monkeypatch.setattr(c, "_env", lambda key, default="": {
+        "FEISHU_RESUME_SESSIONS": "1", "FEISHU_AGENT": "codex",
+    }.get(key, default))
+    assert c.BridgeConfig.load().resume_sessions is True
+
+
+def test_scope_factory_fresh_by_default(tmp_path, monkeypatch):
+    from bridge import session_store
+    from bridge.scope import ScopeRunner
+
+    f = tmp_path / "sessions.json"
+    f.write_text('{"sc1": {"session_id": "th-old", "cwd": "/w", "agent": "codex"}}')
+    monkeypatch.setattr(session_store, "_SESSIONS_FILE", f)
+
+    def make_runner(resume_sessions: bool):
+        cfg = _cfg(agent="codex")
+        cfg.resume_sessions = resume_sessions
+        return ScopeRunner("sc1", "chat1", cfg, None, None)
+
+    ad = make_runner(resume_sessions=False)._default_adapter_factory()
+    assert ad._resume is None  # default: fresh thread, no resume
+
+    ad2 = make_runner(resume_sessions=True)._default_adapter_factory()
+    assert ad2._resume == "th-old"  # opt-in: cross-restart resume

@@ -71,7 +71,13 @@ class ScopeRunner:
             stderr_sink = None
         return make_adapter(
             self.cfg,
-            resume=session_store.get_session_id(self.scope, agent=self.cfg.agent),
+            # Fresh thread per bridge start by default (FEISHU_RESUME_SESSIONS=1
+            # opts back into cross-restart continuity). Identical for claude and
+            # codex; within a running bridge, turns of a chat still share context.
+            resume=(
+                session_store.get_session_id(self.scope, agent=self.cfg.agent)
+                if self.cfg.resume_sessions else None
+            ),
             approval_callback=self._approval_cb,
             stderr_sink=stderr_sink,
         )

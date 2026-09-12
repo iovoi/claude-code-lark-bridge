@@ -18,6 +18,19 @@ Copy the template below, fill it in, and insert it at the top of "Entries".
 
 ## Entries
 
+### 2026-09-13 13:10 — Fresh-thread default at bridge startup (user decision D7)
+- **Task:** post-merge behavior change
+- **What happened:** user asked whether both backends default to resume at
+  bridge startup and requested identical behavior — fresh thread, no resume.
+  Both had indeed resumed persisted sessions by default.
+- **Resolution:** `FEISHU_RESUME_SESSIONS` (default **off**) gates the
+  `session_store` lookup in `ScopeRunner._default_adapter_factory`, uniformly
+  for claude and codex. Within a running bridge, a chat's turns still share
+  context (claude: one long-lived process; codex: in-memory thread chaining).
+  `sessions.json` is still written (observability + opt-in resume).
+- **PRD impact:** §4.1 new env key; Decision log D7; +2 tests (config default,
+  scope factory fresh/opt-in), suite 52 passed.
+
 ### 2026-09-13 12:35 — Live bug: every resumed codex turn died on `-s` (fixed)
 - **Task:** post-merge live use
 - **What happened:** second turn in a codex chat failed — surfaced by the

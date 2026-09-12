@@ -87,6 +87,12 @@ makes the backend pluggable — `claude` (default, unchanged behavior) or `codex
   - `FEISHU_CODEX_SANDBOX` — `read-only` | `workspace-write` (default) |
     `danger-full-access`; passed as the config override
     `-c sandbox_mode="<value>"` (not `-s`: `exec resume` rejects `-s`).
+  - `FEISHU_RESUME_SESSIONS` — `1`/`true` to resume the session/thread stored
+    in `sessions.json` at bridge startup (cross-restart context continuity).
+    **Default OFF**: every bridge start opens a fresh thread per chat for
+    BOTH backends (identical behavior); messages within one running bridge
+    still share context (claude: one long-lived process; codex: the adapter
+    chains turns via `exec resume` of its own in-memory thread id).
 - CLI: `feishu-bridge up --agent claude|codex`, `feishu-bridge run --agent claude|codex`
   (argparse `choices=("claude","codex")`). The flag sets `os.environ["FEISHU_AGENT"]`
   before dispatch, so both the foreground runtime and the supervisor's
@@ -269,6 +275,7 @@ workspace-write and retry" card when a command fails the sandbox policy.
 | D4 | Selection precedence | (a) write agent into .env from CLI flag (b) env-var override set by the CLI | (b) | `up` spawns a detached child; exporting `FEISHU_AGENT` is inherited without mutating the user's `.env` behind their back | 2026-09-06 |
 | D5 | Resume argv placement | (a) flags before `resume` (b) flags after `resume <id>` | (b) | `exec resume` is a clap subcommand defining its own flags; parent flags don't inherit | 2026-09-06 |
 | D6 | Unknown `.env` agent value | (a) hard fail (b) fall back to claude | (b) | bridge must start even with a typo'd value; installer-side flag *does* hard-fail (that's interactive) | 2026-09-06 |
+| D7 | Session resume at bridge startup | (a) always resume stored sessions (b) fresh threads by default, `FEISHU_RESUME_SESSIONS=1` opts in | (b) | resuming stale cross-restart sessions caused both live bugs (cross-agent resume, `-s` on resume); fresh start is predictable; user decision 2026-09-13, identical for both backends | 2026-09-13 |
 
 ## Appendix B — Glossary
 - **AgentEvent** — normalized event stream (`bridge/agent/__init__.py`) the

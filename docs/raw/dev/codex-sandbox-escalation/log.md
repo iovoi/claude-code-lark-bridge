@@ -1,0 +1,46 @@
+# Implementation log: Codex sandbox escalation card
+
+> Append-only; newest entry first. Facts a fresh agent cannot get from the PRD.
+
+## Entries
+
+### 2026-09-13 15:05 — Implementation complete, suite 58 passed
+- **Task:** T1.1, T2.1, T3.1
+- **What happened:** detection (`_looks_sandbox_denied` + built-in signatures
+  + `FEISHU_CODEX_DENY_PATTERNS`), end-of-turn escalation via
+  `ApprovalCallback` (one rerun per turn, tier bump one step,
+  approve_all persists), 6 new tests. Full suite 58 passed in the tmux pane.
+- **PRD impact:** none (built to spec).
+- Next: T3.2 deploy + T3.3 live smoke (needs the user in Feishu).
+
+### 2026-09-13 14:20 — Live sandbox probes (design-defining)
+- **Task:** planning (Phase A)
+- **What happened:** three probes against the Windows codex.exe:
+  read-only write request; workspace-write network command; workspace-write
+  write OUTSIDE the workdir.
+- **Discovery:** (1) read-only → the model refuses preemptively in text; NO
+  command_execution events at all → escalation cannot be triggered from
+  events at that tier. (2) workspace-write does NOT block network on Windows
+  (curl ran; only `head` missing in PowerShell failed). (3) workspace-write
+  DOES block out-of-workdir writes: command runs and fails with
+  `Set-Content : Access to the path 'C:\…' is denied.` — item
+  `status="failed"`, `exit_code=1` → cleanly detectable.
+- **Resolution:** base tier stays workspace-write; trigger = failed
+  command_execution whose output matches denial signatures (PRD §4.1, D1/D2).
+- **PRD impact:** none (probe preceded the PRD write).
+
+### 2026-09-13 14:15 — Phase B review gate covered by user decision
+- **Task:** planning
+- **What happened:** user selected the approach explicitly ("先按 exec +
+  沙箱升级卡近似来推进"), which approves the design direction; docs were
+  then written directly.
+- **PRD impact:** gate skip recorded here per formal-feature convention.
+
+### 2026-09-13 14:10 — Docs relocated (llm-wiki restructure)
+- **Task:** planning
+- **What happened:** user restructured `docs/` into an LLM wiki
+  (`raw/schema/wiki`); feature docs now live under `docs/raw/dev/<feature>/`.
+  This feature's docs were created directly at the new location. The
+  restructure is uncommitted user work — feature commits must `git add` only
+  their own paths.
+- **PRD impact:** none.

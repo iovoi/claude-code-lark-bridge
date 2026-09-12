@@ -12,3 +12,6 @@ tests/_proc_fixture/
 
 # test fixture (created at runtime by tests/test_launcher_session.py)
 tests/_session_fixture/
+
+# llm-wiki docs — kept local until the raw/schema/wiki structure matures (see docs/schema/schema.md locally)
+docs/

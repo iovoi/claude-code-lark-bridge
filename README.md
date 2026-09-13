@@ -1,4 +1,4 @@
-# Feishu/Lark ↔ Claude Code bridge (pipe bridge)
+# Feishu/Lark ↔ coding agent bridge (pipe bridge)
 
 Chat with Claude Code from Feishu/Lark. The bridge drives Claude Code in **non-interactive
 streaming mode** and relays the conversation over Feishu/Lark — no PTY, no tmux, identical
